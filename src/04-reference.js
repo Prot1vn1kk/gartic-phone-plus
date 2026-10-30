@@ -3,14 +3,14 @@
    в новой вкладке: картинку оттуда можно перетащить, вставить (Ctrl+V) или добавить по ссылке.   */
 
 const REF_CSS = `
-.gpp-ref .gpp-win-body{display:flex;flex-direction:column;gap:8px;padding:10px}
+.gpp-ref .gpp-dialog-body{display:flex;flex-direction:column;gap:10px}
 .gpp-ref-bar{display:flex;gap:6px}
 .gpp-ref-bar .gpp-input{flex:1;min-width:0}
 .gpp-ref-grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;align-content:start;min-height:120px}
-.gpp-ref-grid img{width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--gpp-bg2);display:block}
+.gpp-ref-grid img{width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--gpp-field);display:block;box-shadow:0 0 0 1.6px var(--gpp-head-hi)}
 .gpp-ref-grid img:hover{outline:2px solid var(--gpp-accent)}
-.gpp-ref-drop{border:2px dashed var(--gpp-line);border-radius:10px;padding:10px;text-align:center;color:var(--gpp-dim);font-size:12px}
-.gpp-ref.dragover .gpp-ref-drop{border-color:var(--gpp-accent);color:var(--gpp-text)}
+.gpp-ref-drop{border:2px dashed var(--gpp-head-hi);border-radius:10px;padding:10px;text-align:center;color:var(--gpp-dim);font:12px var(--gpp-f-reg)}
+.gpp-ref.dragover .gpp-ref-drop{border-color:var(--gpp-accent);color:#fff}
 .gpp-frame .gpp-win-body{padding:0;overflow:hidden;position:relative;cursor:grab;background:repeating-conic-gradient(#ffffff10 0 25%,transparent 0 50%) 0 0/16px 16px}
 .gpp-frame img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
 .gpp-frame .gpp-win-head{padding:5px 6px 5px 10px}
@@ -143,8 +143,10 @@ const Reference = new (class {
     injectCss(REF_CSS, 'gpp-ref-css');
     this.frames = [];
     this.page = 1;
-    this.win = new Win({ id: 'reference', title: '<b>GP+</b> Референсы', width: 360, height: 460, x: window.innerWidth - 400, y: 80, resizable: true, className: 'gpp-ref' });
-    const b = this.win.body;
+    this.modal = new GameModal({ title: '<b>GP+</b> Референсы', width: 720, height: 620, className: 'gpp-ref' });
+    this.modal.on('open', () => { Painter.ui?.refresh(); setTimeout(() => this.q.focus(), 50); });
+    this.modal.on('close', () => Painter.ui?.refresh());
+    const b = this.modal.body;
     this.q = h('input', { class: 'gpp-input', placeholder: 'Что ищем? Например: cat, лошадь, Eiffel tower' });
     this.q.addEventListener('keydown', e => { if (e.key === 'Enter') this.search(true); });
     this.engine = UI.select(Settings.get('reference', 'engine') in REF_ENGINES ? Settings.get('reference', 'engine') : 'commons',
@@ -153,9 +155,9 @@ const Reference = new (class {
     this.grid.addEventListener('scroll', () => { if (this.grid.scrollTop + this.grid.clientHeight > this.grid.scrollHeight - 80) this.search(false); });
     this.status = h('div', { class: 'gpp-note', style: { margin: 0 } });
     const file = h('input', { type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' } });
-    file.addEventListener('change', () => { [...file.files].forEach(f => this.open(URL.createObjectURL(f), f.name, false)); file.value = ''; });
+    file.addEventListener('change', () => { [...file.files].forEach(f => this.openImage(URL.createObjectURL(f), f.name, false)); file.value = ''; });
     const url = h('input', { class: 'gpp-input', placeholder: 'Ссылка на картинку' });
-    url.addEventListener('keydown', e => { if (e.key === 'Enter' && url.value.trim()) { this.open(url.value.trim()); url.value = ''; } });
+    url.addEventListener('keydown', e => { if (e.key === 'Enter' && url.value.trim()) { this.openImage(url.value.trim()); url.value = ''; } });
     b.append(
       h('div', { class: 'gpp-ref-bar' }, this.q, h('button', { class: 'gpp-btn primary', html: ICON.search, title: 'Искать', onclick: () => this.search(true) })),
       h('div', { class: 'gpp-ref-bar' }, this.engine,
@@ -170,6 +172,11 @@ const Reference = new (class {
     document.addEventListener('paste', e => this.onPaste(e));
     for (const s of Store.get('ref.frames', [])) if (/^https?:/.test(s.src)) this.frames.push(new RefFrame(s.src, { state: s }));
   }
+
+  open() { this.modal.open(); }
+  close() { this.modal.close(); }
+  toggle() { this.modal.toggle(); }
+  isOpen() { return !!this.modal?.isOpen; }
 
   openExternal(where) {
     const q = encodeURIComponent(this.q.value.trim() || 'drawing reference');
@@ -187,38 +194,38 @@ const Reference = new (class {
       const { items, more } = await eng.search(q, this.page);
       this.more = more; this.page++;
       for (const it of items) {
-        const img = h('img', { src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h}`, onclick: () => this.open(it.full, q) });
+        const img = h('img', { src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h}`, onclick: e => { this.openImage(it.full, q); if (!e.shiftKey) this.close(); } });
         this.grid.append(img);
       }
-      this.status.textContent = this.grid.children.length ? `Найдено: ${this.grid.children.length}${more ? '+' : ''}. Клик — открыть поверх игры.` : 'Ничего не найдено. Попробуйте запрос на английском.';
+      this.status.textContent = this.grid.children.length ? `Найдено: ${this.grid.children.length}${more ? '+' : ''}. Клик — открыть поверх игры, Shift+клик — открыть и выбрать ещё.` : 'Ничего не найдено. Попробуйте запрос на английском.';
     } catch (e) {
       this.status.textContent = `${eng.name}: ${e.message}. Попробуйте другой источник.`;
     } finally { this.loading = false; }
   }
 
   bindDrop() {
-    const el = this.win.el;
+    const el = this.modal.dialog;
     el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('dragover'); });
     el.addEventListener('dragleave', () => el.classList.remove('dragover'));
     el.addEventListener('drop', e => {
       e.preventDefault(); el.classList.remove('dragover');
       const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
-      if (files.length) return files.forEach(f => this.open(URL.createObjectURL(f), f.name, false));
+      if (files.length) return files.forEach(f => this.openImage(URL.createObjectURL(f), f.name, false));
       const html = e.dataTransfer.getData('text/html');
       const src = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-      if (src && /^(https?:|data:image)/.test(src.trim())) this.open(src.trim().replace(/&amp;/g, '&'));
+      if (src && /^(https?:|data:image)/.test(src.trim())) this.openImage(src.trim().replace(/&amp;/g, '&'));
     });
   }
 
   onPaste(e) {
-    if (isTyping(e) || !(this.win.visible || Painter.active)) return;
+    if (isTyping(e) || !(this.isOpen() || Painter.active)) return;
     const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
-    if (item) { e.preventDefault(); this.open(URL.createObjectURL(item.getAsFile()), 'Из буфера', false); return; }
+    if (item) { e.preventDefault(); this.openImage(URL.createObjectURL(item.getAsFile()), 'Из буфера', false); return; }
     const text = e.clipboardData?.getData('text');
-    if (text && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(text.trim())) { e.preventDefault(); this.open(text.trim()); }
+    if (text && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(text.trim())) { e.preventDefault(); this.openImage(text.trim()); }
   }
 
-  open(src, title = 'Референс', persist = true) {
+  openImage(src, title = 'Референс', persist = true) {
     const f = new RefFrame(src, { title: String(title).slice(0, 40) });
     f.persist = persist && /^https?:/.test(src);
     this.frames.push(f);

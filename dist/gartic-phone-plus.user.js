@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gartic Phone Plus
 // @namespace    https://github.com/Prot1vn1kk
-// @version      1.0.0
+// @version      1.1.0
 // @description  Расширенное рисование, референсы, таймлапс-плеер и настройки для Gartic Phone. Один скрипт, без внешнего кода и аналитики.
 // @author       Prot1vn1kk
 // @license      MIT
@@ -170,7 +170,6 @@ const DEFAULTS = {
     readyConfirm: false,
     hideHeader: false,
     showCursor: true,
-    studioOpen: true,
   },
   reference: {
     engine: 'google',
@@ -184,8 +183,8 @@ const DEFAULTS = {
     speed: 1,
   },
   ui: {
-    accent: '#8b5cf6',
-    panelOpacity: 0.92,
+    accent: '#5bffb6',
+    panelOpacity: 1,
   },
 };
 
@@ -413,64 +412,77 @@ const Net = new (class extends Emitter {
 /* ───────────────────────────── Стили ───────────────────────────── */
 
 const CSS = `
-:root{--gpp-accent:#8b5cf6;--gpp-bg:rgba(24,18,43,var(--gpp-op,.92));--gpp-bg2:rgba(255,255,255,.06);--gpp-bg3:rgba(255,255,255,.11);
---gpp-line:rgba(255,255,255,.12);--gpp-text:#efeaff;--gpp-dim:#a99fc9;--gpp-r:12px;--gpp-font:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-.gpp,.gpp *{box-sizing:border-box;font-family:var(--gpp-font)}
-.gpp{color:var(--gpp-text);font-size:13px;line-height:1.35}
-.gpp button{font:inherit;color:inherit}
-.gpp-win{position:fixed;z-index:2147483000;background:var(--gpp-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-border:1px solid var(--gpp-line);border-radius:var(--gpp-r);box-shadow:0 18px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;min-width:220px;max-height:calc(100vh - 16px)}
+:root{--gpp-accent:#5bffb6;--gpp-book:rgb(48 26 107/var(--gpp-op,1));--gpp-head:rgb(83,34,160);--gpp-head-hi:rgb(104,61,209);--gpp-edge:rgb(23,5,87);
+--gpp-field:rgb(36,18,84);--gpp-text:#fff;--gpp-dim:rgba(232,222,255,.72);--gpp-line:rgba(160,130,240,.35);
+--gpp-panel-bg:rgba(94,24,51,.6);--gpp-panel-border:rgba(255,110,153,.3);--gpp-panel-shadow:rgba(94,24,51,.6);--gpp-tool-ring:rgb(103,22,52);
+--gpp-f-black:Black,"Arial Black",system-ui,sans-serif;--gpp-f-bold:Bold,system-ui,"Segoe UI",Arial,sans-serif;--gpp-f-reg:Regular,system-ui,"Segoe UI",Arial,sans-serif}
+.gpp,.gpp *{box-sizing:border-box}
+.gpp{color:var(--gpp-text);font:13px/1.35 var(--gpp-f-bold)}
+.gpp :where(button){font:inherit;color:inherit}
+.gpp-win{position:fixed;z-index:2147483000;background:var(--gpp-book);border:1.6px solid var(--gpp-edge);border-radius:14px;
+box-shadow:inset 0 0 0 2px var(--gpp-head),0 6px 0 rgba(0,0,0,.25),0 16px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;min-width:220px;max-height:calc(100vh - 16px)}
 .gpp-win.hidden{display:none}
-.gpp-win-head{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 14px;cursor:grab;user-select:none;border-bottom:1px solid var(--gpp-line)}
+.gpp-win-head{display:flex;align-items:center;gap:6px;padding:7px 8px 7px 14px;cursor:grab;user-select:none;background:var(--gpp-head);
+border-radius:12px 12px 0 0;box-shadow:inset 0 0 0 2px var(--gpp-head-hi)}
 .gpp-win-head:active{cursor:grabbing}
-.gpp-win-title{font-weight:700;font-size:13px;letter-spacing:.2px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gpp-win-title b{color:var(--gpp-accent)}
-.gpp-icon-btn{width:26px;height:26px;border-radius:8px;border:0;background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--gpp-dim);flex:none}
-.gpp-icon-btn:hover{background:var(--gpp-bg3);color:var(--gpp-text)}
-.gpp-icon-btn.on{background:var(--gpp-accent);color:#fff}
-.gpp-icon-btn svg{width:16px;height:16px}
+.gpp-win-title{font:15px/1.2 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.3px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gpp-win-title b{color:var(--gpp-accent);font-weight:400}
+.gpp-icon-btn{width:28px;height:28px;border-radius:8px;border:0;background:transparent;cursor:pointer;display:grid;place-items:center;color:#fff;flex:none;opacity:.85}
+.gpp-icon-btn:hover{background:rgba(255,255,255,.14);opacity:1}
+.gpp-icon-btn.on{background:var(--gpp-accent);color:var(--gpp-edge);opacity:1}
+.gpp-icon-btn svg{width:17px;height:17px}
 .gpp-win-body{padding:12px 14px;overflow:auto;flex:1}
-.gpp-win-body::-webkit-scrollbar{width:8px}.gpp-win-body::-webkit-scrollbar-thumb{background:var(--gpp-bg3);border-radius:8px}
+.gpp-win-body::-webkit-scrollbar,.gpp-scroll::-webkit-scrollbar{width:8px}
+.gpp-win-body::-webkit-scrollbar-thumb,.gpp-scroll::-webkit-scrollbar-thumb{background:var(--gpp-head-hi);border-radius:8px}
 .gpp-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize}
-.gpp-tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--gpp-line);overflow-x:auto}
-.gpp-tab{border:0;background:transparent;padding:8px 11px;border-radius:9px 9px 0 0;cursor:pointer;color:var(--gpp-dim);font-weight:600;white-space:nowrap}
-.gpp-tab:hover{color:var(--gpp-text)}.gpp-tab.on{color:var(--gpp-text);background:var(--gpp-bg2);box-shadow:inset 0 -2px 0 var(--gpp-accent)}
-.gpp-sec{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--gpp-dim);margin:14px 0 6px;font-weight:700}
+.gpp-tabs{display:flex;gap:6px;padding:10px 12px 0;overflow-x:auto}
+.gpp-tab{border:0;background:var(--gpp-field);padding:9px 14px;border-radius:9px 9px 0 0;cursor:pointer;color:var(--gpp-dim);font:13px/1 var(--gpp-f-black);text-transform:uppercase;white-space:nowrap}
+.gpp-tab:hover{color:#fff}.gpp-tab.on{color:var(--gpp-accent);background:var(--gpp-head);box-shadow:inset 0 2px 0 var(--gpp-head-hi)}
+.gpp-sec{font:12px/1 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.6px;color:var(--gpp-accent);margin:16px 0 6px}
 .gpp-sec:first-child{margin-top:0}
-.gpp-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:32px}
+.gpp-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:34px;border-bottom:1px solid rgba(255,255,255,.06)}
 .gpp-row .gpp-label{flex:1;min-width:0}
-.gpp-row .gpp-label small{display:block;color:var(--gpp-dim);font-size:11.5px;margin-top:1px}
-.gpp-switch{position:relative;width:38px;height:22px;border-radius:22px;background:var(--gpp-bg3);border:0;cursor:pointer;flex:none;transition:background .15s}
-.gpp-switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
-.gpp-switch.on{background:var(--gpp-accent)}.gpp-switch.on::after{transform:translateX(16px)}
+.gpp-row .gpp-label small{display:block;color:var(--gpp-dim);font:11.5px/1.3 var(--gpp-f-reg);margin-top:2px}
+.gpp-switch{position:relative;width:42px;height:24px;border-radius:24px;background:var(--gpp-field);box-shadow:inset 0 0 0 2px var(--gpp-head-hi);border:0;cursor:pointer;flex:none;transition:background .15s}
+.gpp-switch::after{content:"";position:absolute;top:4px;left:4px;width:16px;height:16px;border-radius:50%;background:#cbbcf2;transition:transform .15s,background .15s}
+.gpp-switch.on{background:var(--gpp-accent);box-shadow:none}.gpp-switch.on::after{transform:translateX(18px);background:var(--gpp-edge)}
 .gpp-slider{display:flex;align-items:center;gap:8px;width:170px;flex:none}
 .gpp-slider input{flex:1;accent-color:var(--gpp-accent);min-width:0}
-.gpp-slider output{width:42px;text-align:right;color:var(--gpp-dim);font-variant-numeric:tabular-nums}
-.gpp-select,.gpp-input{background:var(--gpp-bg2);border:1px solid var(--gpp-line);color:var(--gpp-text);border-radius:8px;padding:6px 8px;font:inherit;outline:none}
+.gpp-slider output{width:44px;text-align:right;color:var(--gpp-dim);font-variant-numeric:tabular-nums}
+.gpp-select,.gpp-input{background:var(--gpp-field);border:1.6px solid var(--gpp-head-hi);color:#fff;border-radius:8px;padding:6px 8px;font:13px var(--gpp-f-bold);outline:none}
 .gpp-select:focus,.gpp-input:focus{border-color:var(--gpp-accent)}
-.gpp-select option{background:#241b3d}
-.gpp-colorin{width:38px;height:26px;border:1px solid var(--gpp-line);border-radius:7px;padding:0;background:none;cursor:pointer}
-.gpp-btn{border:1px solid var(--gpp-line);background:var(--gpp-bg2);border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
-.gpp-btn:hover{background:var(--gpp-bg3)}
+.gpp-select option{background:var(--gpp-field)}
+.gpp-colorin{width:40px;height:28px;border:1.6px solid #fff;border-radius:7px;padding:0;background:none;cursor:pointer;box-shadow:0 0 0 2px var(--gpp-edge)}
+.gpp-btn{border:0;background:linear-gradient(#f6f0ff,#ddd0f5);color:var(--gpp-edge);border-radius:8px;padding:8px 14px;cursor:pointer;
+font:13px/1 var(--gpp-f-black);text-transform:uppercase;display:inline-flex;align-items:center;gap:6px;box-shadow:inset 0 0 0 2px #fff,0 4px 0 #9687bf;margin-bottom:4px}
+.gpp-btn:hover{filter:brightness(1.05)}.gpp-btn:active{transform:translateY(2px);box-shadow:inset 0 0 0 2px #fff,0 2px 0 #9687bf}
 .gpp-btn svg{width:16px;height:16px;flex:none}
-.gpp-btn.primary{background:var(--gpp-accent);border-color:transparent;color:#fff}
-.gpp-btn.danger:hover{background:#b4235a}
-.gpp-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.gpp-btn.primary{background:linear-gradient(#8dffd0,#3ee6a0);box-shadow:inset 0 0 0 2px #c8ffe8,0 4px 0 #1f9e6c}
+.gpp-btn.danger{background:linear-gradient(#ffb3c8,#ff7aa0);box-shadow:inset 0 0 0 2px #ffd6e2,0 4px 0 #b4235a}
+.gpp-btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
 .gpp-key{display:inline-flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
-.gpp-kbd{border:1px solid var(--gpp-line);background:var(--gpp-bg2);border-radius:7px;padding:3px 8px;font-size:12px;cursor:pointer;min-width:30px;text-align:center}
-.gpp-kbd:hover{border-color:var(--gpp-accent)}.gpp-kbd.rec{border-color:var(--gpp-accent);background:var(--gpp-accent);color:#fff}
+.gpp-kbd{border:1.6px solid var(--gpp-head-hi);background:var(--gpp-field);border-radius:7px;padding:3px 8px;font:12px var(--gpp-f-bold);cursor:pointer;min-width:30px;text-align:center}
+.gpp-kbd:hover{border-color:var(--gpp-accent)}.gpp-kbd.rec{border-color:var(--gpp-accent);background:var(--gpp-accent);color:var(--gpp-edge)}
 .gpp-kbd.empty{color:var(--gpp-dim)}
-.gpp-note{color:var(--gpp-dim);font-size:12px;margin:6px 0}
+.gpp-note{color:var(--gpp-dim);font:12px/1.4 var(--gpp-f-reg);margin:6px 0}
 .gpp-toasts{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:2147483600;display:flex;flex-direction:column;gap:6px;pointer-events:none}
-.gpp-toast{background:var(--gpp-bg);border:1px solid var(--gpp-line);border-radius:10px;padding:8px 14px;box-shadow:0 8px 24px rgba(0,0,0,.35);animation:gpp-in .18s ease-out}
+.gpp-toast{background:var(--gpp-head);border:1.6px solid var(--gpp-edge);box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 4px 0 rgba(0,0,0,.25);border-radius:10px;padding:9px 16px;animation:gpp-in .18s ease-out}
 @keyframes gpp-in{from{opacity:0;transform:translateY(-6px)}}
-.gpp-fab{position:fixed;right:14px;bottom:14px;z-index:2147483100;height:38px;padding:0 14px 0 10px;border-radius:19px;border:1px solid var(--gpp-line);
-background:var(--gpp-bg);backdrop-filter:blur(10px);color:var(--gpp-text);cursor:pointer;display:flex;align-items:center;gap:7px;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.gpp-fab:hover{border-color:var(--gpp-accent)}
-.gpp-fab i{width:20px;height:20px;border-radius:6px;background:var(--gpp-accent);display:grid;place-items:center;font-style:normal;font-size:12px;color:#fff}
-.gpp-modal{position:fixed;inset:0;z-index:2147483500;background:rgba(10,6,22,.55);display:grid;place-items:center}
-.gpp-modal .gpp-dialog{background:var(--gpp-bg);border:1px solid var(--gpp-line);border-radius:14px;padding:18px 20px;min-width:300px;max-width:420px;box-shadow:0 18px 50px rgba(0,0,0,.5)}
-.gpp-dialog h3{margin:0 0 8px;font-size:15px}
+.gpp-entry{position:absolute;z-index:20;height:28px;padding:0 10px 0 6px;border:0;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:5px;
+background:linear-gradient(#8dffd0,#3ee6a0);color:var(--gpp-edge);font:13px/1 var(--gpp-f-black);box-shadow:inset 0 0 0 2px #c8ffe8,0 3px 0 #1f9e6c}
+.gpp-entry:hover{filter:brightness(1.06)}
+.gpp-entry svg{width:16px;height:16px}
+.gpp-entry.floating{position:fixed;right:14px;bottom:14px;z-index:2147483100}
+.gpp-overlay{position:absolute;inset:0;z-index:200;background:rgba(23,5,87,.55);display:flex;align-items:center;justify-content:center}
+.gpp-overlay.fixed{position:fixed;z-index:2147483300}
+.gpp-dialog{position:relative;background:var(--gpp-book);border:1.6px solid var(--gpp-edge);border-radius:14px;box-shadow:inset 0 0 0 2px var(--gpp-head),0 6px 0 rgba(0,0,0,.25);
+display:flex;flex-direction:column;max-width:calc(100% - 40px);max-height:calc(100% - 40px)}
+.gpp-dialog-head{position:relative;background:var(--gpp-head);border-radius:12px 12px 0 0;box-shadow:inset 0 0 0 2px var(--gpp-head-hi);padding:12px 48px;text-align:center;
+font:20px/1.1 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.4px}
+.gpp-dialog-head .gpp-icon-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+.gpp-dialog-body{overflow:auto;flex:1;padding:14px 18px}
+.gpp-confirm{padding:16px 22px;min-width:320px;text-align:center}
+.gpp-confirm .gpp-btns{justify-content:center}
 `;
 
 function injectCss(text, id) {
@@ -502,6 +514,17 @@ const ICON = {
   pin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6zM8 8.5V14"/></svg>',
   palette: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2a6 6 0 1 0 0 12c1 0 1.3-.8.9-1.5-.5-.8 0-1.8 1-1.8H12a2.5 2.5 0 0 0 2-2.5C14 4.6 11.3 2 8 2z"/><circle cx="5" cy="7" r=".9" fill="currentColor"/><circle cx="8" cy="5" r=".9" fill="currentColor"/><circle cx="11" cy="7" r=".9" fill="currentColor"/></svg>',
   gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>',
+  symV: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2.5v19" stroke-dasharray="3 3"/><path d="M9 8 4.5 12 9 16M15 8l4.5 4L15 16"/></svg>',
+  symH: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M2.5 12h19" stroke-dasharray="3 3"/><path d="M8 9l4-4.5L16 9M8 15l4 4.5 4-4.5"/></svg>',
+  symQ: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2.5v19M2.5 12h19" stroke-dasharray="3 3"/><circle cx="6.5" cy="6.5" r="1.8" fill="currentColor"/><circle cx="17.5" cy="6.5" r="1.8" fill="currentColor"/><circle cx="6.5" cy="17.5" r="1.8" fill="currentColor"/><circle cx="17.5" cy="17.5" r="1.8" fill="currentColor"/></svg>',
+  symR: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 12V3M12 12l7.8 4.5M12 12l-7.8 4.5"/></svg>',
+  symM: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke-width="1.5"/></svg>',
+  mirror: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2.5 2.5"/><path d="M9.5 6 3 18h6.5zM14.5 6 21 18h-6.5z"/></svg>',
+  mirrorY: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2.5 2.5"/><path d="M6 9.5 18 3v6.5zM6 14.5 18 21v-6.5z"/></svg>',
+  gray: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg>',
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>',
+  rays: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 12 12 3M12 12l8 4M12 12l-8 4"/></svg>',
 };
 
 /* ───────────────────────────── Окна ───────────────────────────── */
@@ -523,15 +546,50 @@ function toast(text, ms = 2200) {
   setTimeout(() => t.remove(), ms);
 }
 
+/* Окно в стиле диалогов Gartic. Встраивается внутрь .screen игры, поэтому масштабируется вместе с ней. */
+class GameModal extends Emitter {
+  constructor({ title, width = 640, height, className = '' }) {
+    super();
+    this.overlay = h('div', { class: 'gpp gpp-overlay' });
+    this.titleEl = h('span', { html: title });
+    this.head = h('div', { class: 'gpp-dialog-head' }, this.titleEl,
+      h('button', { class: 'gpp-icon-btn', title: 'Закрыть (Esc)', html: ICON.close, onclick: () => this.close() }));
+    this.body = h('div', { class: 'gpp-dialog-body gpp-scroll' });
+    this.dialog = h('div', { class: 'gpp-dialog ' + className, style: { width: width + 'px', height: height ? height + 'px' : null } }, this.head, this.body);
+    this.overlay.append(this.dialog);
+    this.overlay.addEventListener('pointerdown', e => { if (e.target === this.overlay) this.close(); });
+    for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'wheel', 'keydown', 'contextmenu']) this.dialog.addEventListener(t, e => e.stopPropagation());
+    this.onKey = e => { if (e.key === 'Escape' && this.isOpen && !Hotkeys.recording) { e.stopPropagation(); this.close(); } };
+  }
+  get isOpen() { return this.overlay.isConnected; }
+  open() {
+    const host = document.querySelector('.screen');
+    this.overlay.classList.toggle('fixed', !host);
+    (host || document.body).append(this.overlay);
+    window.addEventListener('keydown', this.onKey, true);
+    this.emit('open');
+  }
+  close() {
+    if (!this.isOpen) return;
+    this.overlay.remove();
+    window.removeEventListener('keydown', this.onKey, true);
+    this.emit('close');
+  }
+  toggle() { this.isOpen ? this.close() : this.open(); }
+  setTitle(t) { this.titleEl.innerHTML = t; }
+}
+
 function confirmDialog(title, text, okText = 'Да', cancelText = 'Отмена') {
   return new Promise(resolve => {
-    const done = v => { m.remove(); resolve(v); };
-    const m = h('div', { class: 'gpp gpp-modal', onpointerdown: e => { if (e.target === m) done(false); } },
-      h('div', { class: 'gpp-dialog' }, h('h3', {}, title), h('div', { class: 'gpp-note' }, text),
-        h('div', { class: 'gpp-btns', style: { justifyContent: 'flex-end' } },
-          h('button', { class: 'gpp-btn', onclick: () => done(false) }, cancelText),
-          h('button', { class: 'gpp-btn primary', onclick: () => done(true) }, okText))));
-    document.body.append(m);
+    const m = new GameModal({ title, width: 380, className: 'gpp-confirm-dlg' });
+    let result = false;
+    m.on('close', () => resolve(result));
+    m.body.classList.add('gpp-confirm');
+    m.body.append(h('div', { class: 'gpp-note', style: { fontSize: '14px', color: '#fff' } }, text),
+      h('div', { class: 'gpp-btns' },
+        h('button', { class: 'gpp-btn', onclick: () => m.close() }, cancelText),
+        h('button', { class: 'gpp-btn primary', onclick: () => { result = true; m.close(); } }, okText)));
+    m.open();
   });
 }
 
@@ -1069,7 +1127,6 @@ const PAINTER_CSS = `
 .gpp-details summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--gpp-dim);font-weight:700;list-style:none;margin-bottom:6px}
 .gpp-details summary::before{content:"▸ ";}
 .gpp-details[open] summary::before{content:"▾ ";}
-.gpp-studio .gpp-win-body{padding:12px}
 `;
 
 const Painter = new (class extends Emitter {
@@ -1106,7 +1163,7 @@ const Painter = new (class extends Emitter {
     });
     Net.on('queue', n => this.updateHud(n));
     Settings.on('painter.enabled', on => { if (!on) this.detach(); else if (Net.state.screen === SCREEN.DRAW) this.scheduleAttach(); });
-    this.studio = new Studio(this);
+    this.ui = new GameUI(this);
   }
 
   async scheduleAttach() {
@@ -1162,14 +1219,18 @@ const Painter = new (class extends Emitter {
     this.bindGameUi();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.stage);
-    this.guard = new MutationObserver(() => { if (this.active && !this.stage.isConnected) this.scheduleAttach(); });
+    // React может перерисовать части экрана: слой или встроенные панели тогда монтируются заново
+    this.guard = new MutationObserver(() => {
+      if (!this.active) return;
+      if (!this.stage.isConnected) return this.scheduleAttach();
+      if (!this.ui.mounted && document.querySelector('.colors')) this.ui.mount();
+    });
     this.guard.observe(document.body, { childList: true, subtree: true });
     this.active = true;
     this.resize();
     this.syncGameUi();
+    this.ui.mount();
     this.emit('attach');
-    if (Settings.get('painter', 'studioOpen')) this.studio.win.show();
-    this.studio.refresh();
   }
 
   detach() {
@@ -1183,7 +1244,7 @@ const Painter = new (class extends Emitter {
     for (const c of this.gameCanvases || []) c.style.visibility = '';
     this.stage?.remove();
     this.stage = null;
-    this.studio.win.hide();
+    this.ui.unmount();
     this.picker?.hide();
     this.emit('detach');
   }
@@ -1255,7 +1316,7 @@ const Painter = new (class extends Emitter {
     this.view[key] = !this.view[key];
     if (key === 'gray') this.stage?.classList.toggle('gray', this.view.gray);
     this.render();
-    this.studio.refresh();
+    this.ui.refresh();
   }
 
   render() {
@@ -1331,8 +1392,12 @@ const Painter = new (class extends Emitter {
     c.restore();
   }
 
+  /* Индикаторы состояния: в шапке книги, а если шапки нет — в углу холста */
   updateHud(queueSize = Net.queue.length) {
     if (!this.hud) return;
+    const inHeader = !!this.ui?.chips?.isConnected;
+    this.hud.style.display = inHeader ? 'none' : '';
+    const target = inHeader ? this.ui.chips : this.hud;
     const chips = [];
     if (this.view.zoom !== 1) chips.push(round(this.view.zoom * 100) + '%');
     if (this.view.rot) chips.push('↻ ' + round(this.view.rot) + '°');
@@ -1341,7 +1406,7 @@ const Painter = new (class extends Emitter {
     if (this.view.gray) chips.push('Ч/Б');
     if (this.sym.on) chips.push('Симметрия: ' + SYM_NAMES[this.sym.mode]);
     if (queueSize) chips.push('Отправка: ' + queueSize);
-    this.hud.replaceChildren(...chips.map(t => h('span', { class: 'gpp-chip' + (t.startsWith('Отправка') ? ' accent' : '') }, t)));
+    target.replaceChildren(...chips.map(t => h('span', { class: 'gpp-chip' + (t.startsWith('Отправка') ? ' accent' : '') }, t)));
   }
 
   /* ───── Состояние инструмента ───── */
@@ -1349,7 +1414,7 @@ const Painter = new (class extends Emitter {
   setTool(t) {
     this.tool = t;
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
@@ -1357,7 +1422,7 @@ const Painter = new (class extends Emitter {
     if (!Color.valid(hex)) return;
     this.color = Color.norm(hex);
     if (addRecent) this.pushRecent(this.color);
-    this.studio?.refresh();
+    this.ui?.refresh();
     this.render();
   }
 
@@ -1369,17 +1434,17 @@ const Painter = new (class extends Emitter {
   setThickness(v) {
     this.thickness = clamp(round(v), 1, Settings.get('painter', 'maxThickness'));
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
   setOpacity(v) {
     this.opacity = clamp(round(v), 1, 10);
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
   }
 
-  swapColors() { [this.color, this.color2] = [this.color2, this.color]; this.studio.refresh(); this.render(); }
+  swapColors() { [this.color, this.color2] = [this.color2, this.color]; this.ui.refresh(); this.render(); }
 
   eraserSize() { return Settings.get('painter', 'doubleEraser') ? this.thickness * 2 : this.thickness; }
 
@@ -1638,7 +1703,7 @@ const Painter = new (class extends Emitter {
     if (!c) return;
     if (secondary) this.color2 = c; else this.color = c;
     this.peekColor = c;
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
@@ -1676,7 +1741,7 @@ const Painter = new (class extends Emitter {
       if (!el) return;
       if (el.classList.contains('undo')) { e.stopImmediatePropagation(); e.preventDefault(); return this.undo(); }
       if (el.classList.contains('redo')) { e.stopImmediatePropagation(); e.preventDefault(); return this.redo(); }
-      for (const [cls, id] of Object.entries(GAME_TOOL_CLASS)) if (el.classList.contains(cls)) { this.tool = id; this.studio.refresh(); }
+      for (const [cls, id] of Object.entries(GAME_TOOL_CLASS)) if (el.classList.contains(cls)) { this.tool = id; this.ui.refresh(); }
     }, true);
     const opts = document.querySelector('.options');
     if (opts) {
@@ -1770,11 +1835,11 @@ const Painter = new (class extends Emitter {
     R('redo', 'Повторить', ['Ctrl+KeyY', 'Ctrl+Shift+KeyZ'], { ...G4, repeat: true });
     R('save', 'Сохранить PNG', ['Ctrl+KeyS'], G4);
     R('clear', 'Очистить холст', ['Shift+Delete'], G4);
-    R('studio', 'Панель «Студия»', ['KeyH'], G4);
+    R('studio', 'Показать / скрыть панели GP+', ['KeyH'], G4);
     R('reference', 'Окно референсов', ['KeyP'], { group: 'Окна' });
 
     Hotkeys.on('tap', id => {
-      if (id === 'reference') return Reference.win.toggle();
+      if (id === 'reference') return Reference.toggle();
       if (!this.active) return;
       const T = { brush: TOOL.PEN, eraser: TOOL.ERASER, line: TOOL.LINE, rect: TOOL.RECT, rectFill: TOOL.RECT_FILL, ellipse: TOOL.ELLIPSE, ellipseFill: TOOL.ELLIPSE_FILL, fill: TOOL.FILL };
       if (T[id]) return this.setTool(T[id]);
@@ -1797,12 +1862,12 @@ const Painter = new (class extends Emitter {
         case 'mirrorY': this.toggleView('mirrorY'); break;
         case 'gray': this.toggleView('gray'); break;
         case 'grid': this.toggleView('grid'); break;
-        case 'symmetry': this.sym.on = !this.sym.on; this.studio.refresh(); this.render(); break;
+        case 'symmetry': this.sym.on = !this.sym.on; this.ui.refresh(); this.render(); break;
         case 'undo': this.undo(); break;
         case 'redo': this.redo(); break;
         case 'save': this.saveImage(); break;
         case 'clear': this.clearAll(); break;
-        case 'studio': this.studio.win.toggle(); Settings.set('painter', 'studioOpen', this.studio.win.visible); break;
+        case 'studio': this.ui.togglePanels(); break;
       }
       this.updateHud();
     });
@@ -1830,103 +1895,229 @@ const Painter = new (class extends Emitter {
   }
 })();
 
-/* ───────────────────────────── Панель «Студия» ───────────────────────────── */
+/* ───────────────────────────── Встраивание в интерфейс игры ─────────────────────────────
+   Левая колонка игры (.colors): своя панель цвета вместо родной палитры.
+   Правая колонка (.tools): блок симметрии и вида под инструментами игры.
+   Шапка книги (.header): кнопки «Настройки» и «Референсы», индикаторы состояния.
+   Всё вставляется внутрь .screen, поэтому масштабируется вместе с игрой.            */
 
-class Studio {
+const GAMEUI_CSS = `
+.gpp-col{width:129px;padding:8px;border-radius:9px;background:var(--gpp-panel-bg);border:1.6px solid var(--gpp-panel-border);
+box-shadow:0 0 0 3px var(--gpp-panel-shadow);display:flex;flex-direction:column;gap:7px;color:#fff;font:11px/1.2 var(--gpp-f-bold);user-select:none}
+.gpp-col *{box-sizing:border-box}
+.gpp-right{margin-top:16px}
+.gpp-panels-hidden .gpp-col,.gpp-panels-hidden .gpp-hdr{display:none}
+.gpp-panels-hidden .colors .content.gpp-native-hidden{display:flex !important}
+.gpp-tgrid{display:grid;grid-template-columns:repeat(3,30px);justify-content:space-between;gap:8px 0}
+.gpp-tbtn{position:relative;width:30px;height:30px;border-radius:7px;border:1.6px solid #fff;box-shadow:0 0 0 2px var(--gpp-tool-ring);background:transparent;
+color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;font:12px/1 var(--gpp-f-black)}
+.gpp-tbtn:hover{background:rgba(255,255,255,.18)}
+.gpp-tbtn.on{background:#fff;color:var(--gpp-tool-ring)}
+.gpp-tbtn svg{width:19px;height:19px}
+.gpp-tbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
+background:var(--gpp-edge);color:#fff;font:11px/1 var(--gpp-f-bold);padding:6px 8px;border-radius:6px;pointer-events:none;z-index:50}
+.gpp-left .gpp-tbtn[data-tip]:hover::after{right:auto;left:calc(100% + 8px)}
+.gpp-sep{height:1px;background:var(--gpp-panel-border);margin:1px 0}
+.gpp-colhead{display:flex;align-items:center;gap:6px}
+.gpp-pair{position:relative;width:40px;height:36px;flex:none;cursor:pointer}
+.gpp-pair span{position:absolute;width:26px;height:26px;border-radius:6px;border:1.6px solid rgb(67,17,31);box-shadow:0 0 0 2px #fff}
+.gpp-pair .c1{left:2px;top:2px;z-index:1}.gpp-pair .c2{right:2px;bottom:2px}
+.gpp-hex{width:100%;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:11px var(--gpp-f-bold);padding:4px 5px;outline:none;text-transform:uppercase}
+.gpp-hex:focus{border-color:#fff}
+.gpp-col .gpp-cp{gap:6px}
+.gpp-col .gpp-cp canvas{border-radius:6px;box-shadow:0 0 0 1.6px rgba(255,255,255,.7)}
+.gpp-col .gpp-cp-huewrap canvas{height:10px;border-radius:5px}
+.gpp-col .gpp-cp-hmark{height:16px}
+.gpp-rangebox{display:flex;align-items:center;gap:5px}
+.gpp-rangebox input{flex:1;min-width:0;accent-color:#fff;height:14px}
+.gpp-rangebox b{width:26px;text-align:right;font:11px var(--gpp-f-black)}
+.gpp-palbar{display:flex;align-items:center;gap:3px}
+.gpp-palbar select{flex:1;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:10.5px var(--gpp-f-bold);padding:3px 2px;outline:none}
+.gpp-palbar select option{background:var(--gpp-field)}
+.gpp-palbar button{width:20px;height:20px;border:0;border-radius:5px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
+.gpp-palbar button:hover{background:rgba(255,255,255,.3)}
+.gpp-palbar svg{width:13px;height:13px}
+.gpp-swgrid{display:grid;grid-template-columns:repeat(5,18px);justify-content:space-between;gap:5px 0;max-height:118px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
+.gpp-swgrid::-webkit-scrollbar{width:4px}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
+.gpp-col .gpp-sw{width:18px;height:18px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
+.gpp-col .gpp-sw:hover{transform:scale(1.12)}
+.gpp-col .gpp-sw.sel{box-shadow:0 0 0 2.5px var(--gpp-accent)}
+.gpp-recent{grid-template-columns:repeat(5,18px);max-height:none}
+.gpp-hdr{position:absolute;left:56px;top:10px;display:flex;gap:4px;z-index:6}
+.gpp-hbtn{width:32px;height:30px;border:0;background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;border-radius:7px}
+.gpp-hbtn:hover{background:rgba(255,255,255,.14)}
+.gpp-hbtn.on{background:var(--gpp-accent);color:var(--gpp-edge)}
+.gpp-hbtn svg{width:25px;height:25px;filter:drop-shadow(0 2px 0 rgba(23,5,87,.7))}
+.gpp-hbtn svg *{stroke-width:2.1}
+.gpp-chips{position:absolute;left:16px;top:50px;display:flex;flex-wrap:wrap;gap:4px;max-width:215px;z-index:6;pointer-events:none}
+.gpp-chips .gpp-chip{background:rgba(23,5,87,.55);color:#fff;font:11px/1 var(--gpp-f-bold);border-radius:999px;padding:5px 8px}
+.gpp-chips .gpp-chip.accent{background:var(--gpp-accent);color:var(--gpp-edge)}
+`;
+
+class GameUI {
   constructor(p) {
     this.p = p;
-    this.win = new Win({ id: 'studio', title: '<b>GP+</b> Студия', width: 268, x: 16, y: 90, className: 'gpp-studio' });
-    this.win.on('hide', () => { if (p.active) Settings.set('painter', 'studioOpen', false); });
-    this.win.on('show', () => { if (p.active) Settings.set('painter', 'studioOpen', true); });
-    this.build();
+    this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
+    this.palName = Store.get('palette.current', 'Gartic');
+    this.gamePalette = [];
+    injectCss(GAMEUI_CSS, 'gpp-gameui-css');
   }
 
-  build() {
-    const p = this.p, b = this.win.body;
-    this.sw = h('div', { class: 'gpp-swatch2', title: 'Основной / дополнительный (ПКМ рисует доп. цветом). Клик — поменять', onclick: () => p.swapColors() },
-      this.c1 = h('span', { class: 'c1' }), this.c2 = h('span', { class: 'c2' }));
-    this.hex = h('input', { class: 'gpp-input', style: { width: '92px' }, maxlength: 7, spellcheck: 'false' });
-    this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
-    this.toolName = h('div', { class: 'gpp-note', style: { margin: 0 } });
-    b.append(h('div', { class: 'gpp-colors-top' }, this.sw, h('div', {}, this.hex, this.toolName)));
+  get mounted() { return !!this.left?.isConnected; }
 
-    this.cp = new ColorPicker({ width: 240, height: 140 });
+  mount() {
+    this.unmount();
+    const screen = document.querySelector('.screen');
+    const colors = document.querySelector('.colors');
+    const tools = document.querySelector('.tools');
+    const header = document.querySelector('.book .header');
+    if (!screen) return;
+    this.screen = screen;
+    this.copyTheme();
+    if (colors) {
+      const native = colors.querySelector('.content');
+      this.gamePalette = [...colors.querySelectorAll('.color')].map(c => (getComputedStyle(c).backgroundColor.match(/\d+/g) || []).slice(0, 3))
+        .filter(a => a.length === 3).map(a => Color.rgbToHex(+a[0], +a[1], +a[2]));
+      if (native) { native.classList.add('gpp-native-hidden'); native.style.display = 'none'; this.native = native; }
+      this.left = this.buildLeft();
+      colors.append(this.left);
+    }
+    if (tools) { this.right = this.buildRight(); tools.append(this.right); }
+    if (header) {
+      this.hdr = h('div', { class: 'gpp-hdr gpp' },
+        this.hbtn(ICON.gear, 'Настройки GP+', () => Menu.open()),
+        this.refBtn = this.hbtn(ICON.image, 'Референсы (P)', () => Reference.toggle()));
+      this.chips = h('div', { class: 'gpp-chips gpp' });
+      header.append(this.hdr, this.chips);
+    }
+    screen.classList.toggle('gpp-panels-hidden', !!Store.get('panels.hidden', false));
+    this.refresh();
+    this.p.updateHud();
+  }
+
+  unmount() {
+    for (const el of [this.left, this.right, this.hdr, this.chips]) el?.remove();
+    if (this.native) { this.native.style.display = ''; this.native.classList.remove('gpp-native-hidden'); }
+    this.screen?.classList.remove('gpp-panels-hidden');
+    this.left = this.right = this.hdr = this.chips = this.native = null;
+  }
+
+  togglePanels() {
+    const hidden = !Store.get('panels.hidden', false);
+    Store.set('panels.hidden', hidden);
+    this.screen?.classList.toggle('gpp-panels-hidden', hidden);
+    toast(hidden ? 'Панели GP+ скрыты (H — вернуть)' : 'Панели GP+ показаны');
+  }
+
+  /* Цвета панелей берутся с колонки инструментов: у разных экранов игры своя гамма */
+  copyTheme() {
+    const panel = document.querySelector('.tools > div'), tool = document.querySelector('.tools .tool');
+    const st = this.screen.style;
+    if (panel) {
+      const cs = getComputedStyle(panel);
+      st.setProperty('--gpp-panel-bg', cs.backgroundColor);
+      st.setProperty('--gpp-panel-border', cs.borderTopColor);
+      const sh = cs.boxShadow.match(/rgba?\([^)]+\)/);
+      if (sh) st.setProperty('--gpp-panel-shadow', sh[0]);
+    }
+    if (tool) {
+      const ring = getComputedStyle(tool).boxShadow.match(/rgba?\([^)]+\)/);
+      if (ring) st.setProperty('--gpp-tool-ring', ring[0]);
+    }
+  }
+
+  hbtn(icon, tip, onclick) {
+    return h('button', { class: 'gpp-hbtn', title: tip, html: icon, onclick: e => { e.stopPropagation(); onclick(); } });
+  }
+
+  tbtn(icon, tip, onclick, data = {}) {
+    return h('button', { class: 'gpp-tbtn', 'data-tip': tip, html: icon, dataset: data, onclick: e => { e.stopPropagation(); onclick(e); } });
+  }
+
+  stop(el) {
+    for (const t of ['pointerdown', 'mousedown', 'click', 'wheel', 'keydown']) el.addEventListener(t, e => e.stopPropagation());
+    return el;
+  }
+
+  buildLeft() {
+    const p = this.p;
+    this.c1 = h('span', { class: 'c1' }); this.c2 = h('span', { class: 'c2' });
+    this.hex = h('input', { class: 'gpp-hex', maxlength: 7, spellcheck: 'false', title: 'HEX-код цвета' });
+    this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
+    this.cp = new ColorPicker({ width: 111, height: 78 });
     this.cp.on('input', hex => p.setColor(hex, false));
     this.cp.on('commit', hex => p.pushRecent(hex));
-    b.append(this.cp.el);
-
-    this.recentRow = h('div', { class: 'gpp-sw-row', style: { marginTop: '8px' } });
-    b.append(this.recentRow);
-
-    /* Гармонии */
-    this.harmMode = Store.get('harmony', 'complementary');
-    this.harmRow = h('div', { class: 'gpp-sw-row' });
-    const harmSel = UI.select(this.harmMode, [['complementary', 'Комплементарные'], ['triad', 'Триада'], ['analog', 'Аналоговые'], ['tetrad', 'Тетрада'], ['shades', 'Оттенки']],
-      v => { this.harmMode = v; Store.set('harmony', v); this.refresh(); });
-    harmSel.style.width = '100%';
-    b.append(this.details('Цветовой круг', harmSel, h('div', { style: { height: '6px' } }), this.harmRow));
-
-    /* Палитры */
-    this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
-    this.palName = Store.get('palette.current', 'Базовая');
-    this.palSel = h('select', { class: 'gpp-select', style: { flex: 1, minWidth: 0 } });
+    this.size = h('input', { type: 'range', min: 1, step: 1, title: 'Толщина кисти' });
+    this.size.addEventListener('input', () => p.setThickness(+this.size.value));
+    this.sizeVal = h('b');
+    this.palSel = h('select', { title: 'Палитра' });
     this.palSel.addEventListener('change', () => { this.palName = this.palSel.value; Store.set('palette.current', this.palName); this.refresh(); });
-    this.palGrid = h('div', { class: 'gpp-sw-row' });
     const file = h('input', { type: 'file', accept: '.aco,.gpl,.txt,.hex', style: { display: 'none' } });
     file.addEventListener('change', () => this.importPalette(file.files[0]).finally(() => (file.value = '')));
-    b.append(this.details('Палитра',
-      h('div', { class: 'gpp-mini' }, this.palSel,
-        h('button', { class: 'gpp-icon-btn', title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
-        h('button', { class: 'gpp-icon-btn', title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
-        h('button', { class: 'gpp-icon-btn', title: 'Удалить палитру', html: ICON.trash, onclick: () => this.deletePalette() })),
-      this.palGrid, file, h('div', { class: 'gpp-note' }, 'ЛКМ — основной цвет, ПКМ — дополнительный, Shift+клик — удалить из своей палитры.')));
-
-    /* Кисть */
-    const mini = (label, min, max, step, get, set) => {
-      const out = h('output');
-      const inp = h('input', { type: 'range', min, max, step });
-      inp.addEventListener('input', () => set(+inp.value));
-      const row = h('div', { class: 'gpp-mini' }, h('label', {}, label), inp, out);
-      row.upd = () => { inp.max = typeof max === 'function' ? max() : max; inp.value = get(); out.textContent = get(); };
-      return row;
-    };
-    this.minis = [
-      mini('Толщина', 1, () => Settings.get('painter', 'maxThickness'), 1, () => p.thickness, v => p.setThickness(v)),
-      mini('Насыщенность', 1, 10, 1, () => p.opacity, v => p.setOpacity(v)),
-      mini('Сглаживание', 0, 8, 1, () => Settings.get('painter', 'smoothing'), v => { Settings.set('painter', 'smoothing', v); this.refresh(); }),
-    ];
-    this.toolSeg = h('div', { class: 'gpp-seg' });
-    for (const [id, short] of [[1, 'Кисть'], [2, 'Ластик'], [3, 'Линия'], [4, '▭'], [6, '■'], [5, '◯'], [7, '●'], [8, 'Заливка']])
-      this.toolSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { tool: id }, title: TOOL_NAMES[id], onclick: () => p.setTool(id) }, short));
-    b.append(this.details('Кисть', this.toolSeg, h('div', { style: { height: '6px' } }), ...this.minis));
-
-    /* Симметрия */
-    this.symSwitch = UI.switch(false, v => { p.sym.on = v; p.render(); p.updateHud(); });
-    this.symSeg = h('div', { class: 'gpp-seg' });
-    for (const [mode, short] of [[SYM.VERTICAL, '│'], [SYM.HORIZONTAL, '─'], [SYM.QUADRANT, '┼'], [SYM.RADIAL, 'Радиал'], [SYM.MANDALA, 'Мандала']])
-      this.symSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { mode }, title: SYM_NAMES[mode], onclick: () => { p.sym.mode = mode; p.sym.on = true; this.refresh(); p.render(); p.updateHud(); } }, short));
-    this.symCount = mini('Лучей', 2, 24, 1, () => p.symCount(), v => { Settings.set('painter', p.sym.mode === SYM.RADIAL ? 'radialCount' : 'mandalaCount', v); this.refresh(); p.render(); });
-    b.append(this.details('Симметрия', UI.row('Включена', null, this.symSwitch), this.symSeg, this.symCount));
-
-    /* Вид */
-    this.viewSeg = h('div', { class: 'gpp-seg' });
-    for (const [key, label] of [['mirrorX', 'Зеркало'], ['mirrorY', 'Зеркало ↕'], ['gray', 'Ч/Б'], ['grid', 'Сетка']])
-      this.viewSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { key }, onclick: () => { p.toggleView(key); p.updateHud(); } }, label));
-    b.append(this.details('Вид', this.viewSeg, h('div', { class: 'gpp-btns' },
-      h('button', { class: 'gpp-btn', onclick: () => { p.resetView(); p.updateHud(); } }, 'Сбросить вид'),
-      h('button', { class: 'gpp-btn', onclick: () => p.saveImage() }, 'PNG'),
-      h('button', { class: 'gpp-btn danger', onclick: () => p.clearAll() }, 'Очистить'))));
+    this.palGrid = h('div', { class: 'gpp-swgrid' });
+    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent' });
+    return this.stop(h('div', { class: 'gpp-col gpp-left gpp' },
+      h('div', { class: 'gpp-colhead' },
+        h('div', { class: 'gpp-pair', title: 'Основной / дополнительный цвет (ПКМ рисует дополнительным). Клик — поменять (X)', onclick: () => p.swapColors() }, this.c1, this.c2),
+        this.hex),
+      this.cp.el,
+      h('div', { class: 'gpp-rangebox', title: 'Толщина кисти ([ и ])' }, this.size, this.sizeVal),
+      h('div', { class: 'gpp-sep' }),
+      h('div', { class: 'gpp-palbar' }, this.palSel,
+        h('button', { title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
+        h('button', { title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
+        file),
+      this.palGrid,
+      h('div', { class: 'gpp-sep' }),
+      this.recentGrid));
   }
 
-  details(title, ...content) {
-    const key = 'studio.open.' + title;
-    const d = h('details', { class: 'gpp-details' }, h('summary', {}, title), ...content);
-    if (Store.get(key, !['Цветовой круг', 'Вид'].includes(title))) d.open = true;
-    d.addEventListener('toggle', () => Store.set(key, d.open));
-    return d;
+  buildRight() {
+    const p = this.p;
+    const symBtn = (mode, icon, tip) => this.tbtn(icon, tip, () => {
+      if (p.sym.on && p.sym.mode === mode) p.sym.on = false;
+      else { p.sym.mode = mode; p.sym.on = true; }
+      this.refresh(); p.render(); p.updateHud();
+    }, { mode });
+    this.raysBtn = this.tbtn('', 'Лучей: колесо мыши или клик', e => this.changeRays(e.shiftKey ? -1 : 1));
+    this.raysBtn.addEventListener('wheel', e => { e.preventDefault(); this.changeRays(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+    this.raysBtn.addEventListener('contextmenu', e => { e.preventDefault(); this.changeRays(-1); });
+    const viewBtn = (key, icon, tip) => this.tbtn(icon, tip, () => { p.toggleView(key); p.updateHud(); }, { key });
+    this.symGrid = h('div', { class: 'gpp-tgrid' },
+      symBtn(SYM.VERTICAL, ICON.symV, 'Симметрия: вертикальная ось (T)'),
+      symBtn(SYM.HORIZONTAL, ICON.symH, 'Симметрия: горизонтальная ось'),
+      symBtn(SYM.QUADRANT, ICON.symQ, 'Симметрия: 4 четверти'),
+      symBtn(SYM.RADIAL, ICON.symR, 'Симметрия: радиальная'),
+      symBtn(SYM.MANDALA, ICON.symM, 'Симметрия: мандала'),
+      this.raysBtn);
+    this.viewGrid = h('div', { class: 'gpp-tgrid' },
+      viewBtn('mirrorX', ICON.mirror, 'Зеркальный вид (M)'),
+      viewBtn('mirrorY', ICON.mirrorY, 'Зеркальный вид по вертикали (Shift+M)'),
+      viewBtn('gray', ICON.gray, 'Чёрно-белый просмотр (W)'),
+      viewBtn('grid', ICON.grid, 'Сетка (G)'),
+      this.tbtn(ICON.target, 'Сбросить масштаб и поворот (A)', () => { p.resetView(); p.updateHud(); }),
+      this.tbtn(ICON.trash, 'Очистить холст (Shift+Delete)', () => p.clearAll()));
+    return this.stop(h('div', { class: 'gpp-col gpp-right gpp' }, this.symGrid, h('div', { class: 'gpp-sep' }), this.viewGrid));
   }
 
-  allPalettes() { return { ...BUILTIN_PALETTES, ...this.palettes }; }
+  changeRays(d) {
+    const p = this.p;
+    const key = p.sym.mode === SYM.MANDALA ? 'mandalaCount' : 'radialCount';
+    if (p.sym.mode !== SYM.RADIAL && p.sym.mode !== SYM.MANDALA) { p.sym.mode = SYM.RADIAL; p.sym.on = true; }
+    Settings.set('painter', key, clamp(Settings.get('painter', key) + d, 2, 24));
+    this.refresh(); p.render(); p.updateHud();
+  }
+
+  allPalettes() {
+    return { Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
+  }
+
+  harmony() {
+    const [hh, s, v] = Color.hexToHsv(this.p.color);
+    const at = d => Color.hsvToHex((hh + d + 1) % 1, s, v);
+    return [this.p.color, at(0.5), at(1 / 3), at(2 / 3), at(-1 / 12), at(1 / 12), at(0.25), at(0.75),
+      ...[0.25, 0.5, 0.75, 1].map(k => Color.hsvToHex(hh, s, k * Math.max(v, 0.3))), ...[0.3, 0.6].map(k => Color.hsvToHex(hh, s * k, v))];
+  }
 
   addToMine() {
     const mine = this.palettes['Мои цвета'] || (this.palettes['Мои цвета'] = []);
@@ -1936,14 +2127,6 @@ class Studio {
   }
 
   savePalettes() { Store.set('palettes', this.palettes); Store.set('palette.current', this.palName); this.refresh(); }
-
-  deletePalette() {
-    if (BUILTIN_PALETTES[this.palName]) return toast('Встроенную палитру удалить нельзя');
-    if (this.palName === 'Мои цвета') this.palettes['Мои цвета'] = [];
-    else delete this.palettes[this.palName];
-    this.palName = 'Базовая';
-    this.savePalettes();
-  }
 
   async importPalette(f) {
     if (!f) return;
@@ -1958,21 +2141,9 @@ class Studio {
     } catch (e) { toast('Не удалось прочитать палитру: ' + e.message); }
   }
 
-  harmony() {
-    const [hh, s, v] = Color.hexToHsv(this.p.color);
-    const at = d => Color.hsvToHex((hh + d + 1) % 1, s, v);
-    switch (this.harmMode) {
-      case 'complementary': return [this.p.color, at(0.5), Color.hsvToHex(hh, s * 0.5, v), Color.hsvToHex((hh + 0.5) % 1, s * 0.5, v), Color.hsvToHex(hh, s, v * 0.6)];
-      case 'triad': return [this.p.color, at(1 / 3), at(2 / 3)];
-      case 'analog': return [at(-1 / 12), at(-1 / 24), this.p.color, at(1 / 24), at(1 / 12)];
-      case 'tetrad': return [this.p.color, at(0.25), at(0.5), at(0.75)];
-      default: return [0.2, 0.4, 0.6, 0.8, 1].map(k => Color.hsvToHex(hh, s, k)).concat([0.25, 0.5, 0.75].map(k => Color.hsvToHex(hh, s * k, v)));
-    }
-  }
-
-  swatch(hex, { removable } = {}) {
+  swatch(hex, removable) {
     return h('div', {
-      class: 'gpp-sw' + (hex === this.p.color ? ' sel' : ''), title: hex, style: { background: hex },
+      class: 'gpp-sw' + (hex === this.p.color ? ' sel' : ''), title: hex + (removable ? ' (Shift+клик — удалить)' : ''), style: { background: hex },
       onclick: e => {
         if (e.shiftKey && removable) { this.palettes[this.palName] = this.palettes[this.palName].filter(c => c !== hex); return this.savePalettes(); }
         this.p.setColor(hex);
@@ -1983,27 +2154,30 @@ class Studio {
 
   refresh() {
     const p = this.p;
-    if (!this.win) return;
+    if (!this.mounted) return;
     this.c1.style.background = p.color;
     this.c2.style.background = p.color2;
     if (document.activeElement !== this.hex) this.hex.value = p.color;
-    this.toolName.textContent = TOOL_NAMES[p.tool] + ' · ' + p.thickness + 'px';
     if (!this.cp.dragging) this.cp.set(p.color);
-    this.recentRow.replaceChildren(...p.recent.map(c => this.swatch(c)));
-    this.harmRow.replaceChildren(...this.harmony().map(c => this.swatch(c)));
+    this.size.max = Settings.get('painter', 'maxThickness');
+    this.size.value = p.thickness;
+    this.sizeVal.textContent = p.thickness;
     const all = this.allPalettes();
-    if (!all[this.palName]) this.palName = 'Базовая';
+    if (!all[this.palName]) this.palName = 'Gartic';
     this.palSel.replaceChildren(...Object.keys(all).map(n => h('option', { value: n, selected: n === this.palName }, n)));
-    const removable = !BUILTIN_PALETTES[this.palName];
-    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, { removable })));
-    if (!all[this.palName].length) this.palGrid.append(h('div', { class: 'gpp-note' }, 'Пусто. Нажмите «+», чтобы добавить текущий цвет.'));
-    this.minis.forEach(m => m.upd());
-    this.toolSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.tool === p.tool));
-    this.symSwitch.set(p.sym.on);
-    this.symSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.mode === p.sym.mode));
-    this.symCount.style.display = p.sym.mode === SYM.RADIAL || p.sym.mode === SYM.MANDALA ? '' : 'none';
-    this.symCount.upd();
-    this.viewSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', !!p.view[b.dataset.key]));
+    const removable = !!this.palettes[this.palName];
+    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
+    if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
+    this.recentGrid.replaceChildren(...p.recent.slice(0, 10).map(c => this.swatch(c)));
+    this.recentGrid.style.display = p.recent.length ? '' : 'none';
+    if (this.right) {
+      this.symGrid.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', p.sym.on && b.dataset.mode === p.sym.mode));
+      const rays = p.sym.mode === SYM.RADIAL || p.sym.mode === SYM.MANDALA;
+      this.raysBtn.textContent = rays ? p.symCount() : '';
+      if (!rays) this.raysBtn.innerHTML = ICON.rays;
+      this.viewGrid.querySelectorAll('[data-key]').forEach(b => b.classList.toggle('on', !!p.view[b.dataset.key]));
+    }
+    this.refBtn?.classList.toggle('on', Reference.isOpen?.() || false);
   }
 }
 /* ───────────────────────────── Референсы ─────────────────────────────
@@ -2011,14 +2185,14 @@ class Studio {
    в новой вкладке: картинку оттуда можно перетащить, вставить (Ctrl+V) или добавить по ссылке.   */
 
 const REF_CSS = `
-.gpp-ref .gpp-win-body{display:flex;flex-direction:column;gap:8px;padding:10px}
+.gpp-ref .gpp-dialog-body{display:flex;flex-direction:column;gap:10px}
 .gpp-ref-bar{display:flex;gap:6px}
 .gpp-ref-bar .gpp-input{flex:1;min-width:0}
 .gpp-ref-grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;align-content:start;min-height:120px}
-.gpp-ref-grid img{width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--gpp-bg2);display:block}
+.gpp-ref-grid img{width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--gpp-field);display:block;box-shadow:0 0 0 1.6px var(--gpp-head-hi)}
 .gpp-ref-grid img:hover{outline:2px solid var(--gpp-accent)}
-.gpp-ref-drop{border:2px dashed var(--gpp-line);border-radius:10px;padding:10px;text-align:center;color:var(--gpp-dim);font-size:12px}
-.gpp-ref.dragover .gpp-ref-drop{border-color:var(--gpp-accent);color:var(--gpp-text)}
+.gpp-ref-drop{border:2px dashed var(--gpp-head-hi);border-radius:10px;padding:10px;text-align:center;color:var(--gpp-dim);font:12px var(--gpp-f-reg)}
+.gpp-ref.dragover .gpp-ref-drop{border-color:var(--gpp-accent);color:#fff}
 .gpp-frame .gpp-win-body{padding:0;overflow:hidden;position:relative;cursor:grab;background:repeating-conic-gradient(#ffffff10 0 25%,transparent 0 50%) 0 0/16px 16px}
 .gpp-frame img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
 .gpp-frame .gpp-win-head{padding:5px 6px 5px 10px}
@@ -2151,8 +2325,10 @@ const Reference = new (class {
     injectCss(REF_CSS, 'gpp-ref-css');
     this.frames = [];
     this.page = 1;
-    this.win = new Win({ id: 'reference', title: '<b>GP+</b> Референсы', width: 360, height: 460, x: window.innerWidth - 400, y: 80, resizable: true, className: 'gpp-ref' });
-    const b = this.win.body;
+    this.modal = new GameModal({ title: '<b>GP+</b> Референсы', width: 720, height: 620, className: 'gpp-ref' });
+    this.modal.on('open', () => { Painter.ui?.refresh(); setTimeout(() => this.q.focus(), 50); });
+    this.modal.on('close', () => Painter.ui?.refresh());
+    const b = this.modal.body;
     this.q = h('input', { class: 'gpp-input', placeholder: 'Что ищем? Например: cat, лошадь, Eiffel tower' });
     this.q.addEventListener('keydown', e => { if (e.key === 'Enter') this.search(true); });
     this.engine = UI.select(Settings.get('reference', 'engine') in REF_ENGINES ? Settings.get('reference', 'engine') : 'commons',
@@ -2161,9 +2337,9 @@ const Reference = new (class {
     this.grid.addEventListener('scroll', () => { if (this.grid.scrollTop + this.grid.clientHeight > this.grid.scrollHeight - 80) this.search(false); });
     this.status = h('div', { class: 'gpp-note', style: { margin: 0 } });
     const file = h('input', { type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' } });
-    file.addEventListener('change', () => { [...file.files].forEach(f => this.open(URL.createObjectURL(f), f.name, false)); file.value = ''; });
+    file.addEventListener('change', () => { [...file.files].forEach(f => this.openImage(URL.createObjectURL(f), f.name, false)); file.value = ''; });
     const url = h('input', { class: 'gpp-input', placeholder: 'Ссылка на картинку' });
-    url.addEventListener('keydown', e => { if (e.key === 'Enter' && url.value.trim()) { this.open(url.value.trim()); url.value = ''; } });
+    url.addEventListener('keydown', e => { if (e.key === 'Enter' && url.value.trim()) { this.openImage(url.value.trim()); url.value = ''; } });
     b.append(
       h('div', { class: 'gpp-ref-bar' }, this.q, h('button', { class: 'gpp-btn primary', html: ICON.search, title: 'Искать', onclick: () => this.search(true) })),
       h('div', { class: 'gpp-ref-bar' }, this.engine,
@@ -2178,6 +2354,11 @@ const Reference = new (class {
     document.addEventListener('paste', e => this.onPaste(e));
     for (const s of Store.get('ref.frames', [])) if (/^https?:/.test(s.src)) this.frames.push(new RefFrame(s.src, { state: s }));
   }
+
+  open() { this.modal.open(); }
+  close() { this.modal.close(); }
+  toggle() { this.modal.toggle(); }
+  isOpen() { return !!this.modal?.isOpen; }
 
   openExternal(where) {
     const q = encodeURIComponent(this.q.value.trim() || 'drawing reference');
@@ -2195,38 +2376,38 @@ const Reference = new (class {
       const { items, more } = await eng.search(q, this.page);
       this.more = more; this.page++;
       for (const it of items) {
-        const img = h('img', { src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h}`, onclick: () => this.open(it.full, q) });
+        const img = h('img', { src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h}`, onclick: e => { this.openImage(it.full, q); if (!e.shiftKey) this.close(); } });
         this.grid.append(img);
       }
-      this.status.textContent = this.grid.children.length ? `Найдено: ${this.grid.children.length}${more ? '+' : ''}. Клик — открыть поверх игры.` : 'Ничего не найдено. Попробуйте запрос на английском.';
+      this.status.textContent = this.grid.children.length ? `Найдено: ${this.grid.children.length}${more ? '+' : ''}. Клик — открыть поверх игры, Shift+клик — открыть и выбрать ещё.` : 'Ничего не найдено. Попробуйте запрос на английском.';
     } catch (e) {
       this.status.textContent = `${eng.name}: ${e.message}. Попробуйте другой источник.`;
     } finally { this.loading = false; }
   }
 
   bindDrop() {
-    const el = this.win.el;
+    const el = this.modal.dialog;
     el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('dragover'); });
     el.addEventListener('dragleave', () => el.classList.remove('dragover'));
     el.addEventListener('drop', e => {
       e.preventDefault(); el.classList.remove('dragover');
       const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
-      if (files.length) return files.forEach(f => this.open(URL.createObjectURL(f), f.name, false));
+      if (files.length) return files.forEach(f => this.openImage(URL.createObjectURL(f), f.name, false));
       const html = e.dataTransfer.getData('text/html');
       const src = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-      if (src && /^(https?:|data:image)/.test(src.trim())) this.open(src.trim().replace(/&amp;/g, '&'));
+      if (src && /^(https?:|data:image)/.test(src.trim())) this.openImage(src.trim().replace(/&amp;/g, '&'));
     });
   }
 
   onPaste(e) {
-    if (isTyping(e) || !(this.win.visible || Painter.active)) return;
+    if (isTyping(e) || !(this.isOpen() || Painter.active)) return;
     const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
-    if (item) { e.preventDefault(); this.open(URL.createObjectURL(item.getAsFile()), 'Из буфера', false); return; }
+    if (item) { e.preventDefault(); this.openImage(URL.createObjectURL(item.getAsFile()), 'Из буфера', false); return; }
     const text = e.clipboardData?.getData('text');
-    if (text && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(text.trim())) { e.preventDefault(); this.open(text.trim()); }
+    if (text && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(text.trim())) { e.preventDefault(); this.openImage(text.trim()); }
   }
 
-  open(src, title = 'Референс', persist = true) {
+  openImage(src, title = 'Референс', persist = true) {
     const f = new RefFrame(src, { title: String(title).slice(0, 40) });
     f.persist = persist && /^https?:/.test(src);
     this.frames.push(f);
@@ -2252,12 +2433,17 @@ const PLAYER_CSS = `
 .gpp-player canvas{width:100%;flex:1;min-height:0;object-fit:contain;background:transparent;display:block}
 .gpp-player-ctrl{display:flex;align-items:center;gap:6px}
 .gpp-player-ctrl input[type=range]{flex:1;accent-color:var(--gpp-accent);min-width:0}
-.gpp-player-ctrl .gpp-select{padding:4px 6px}
-.gpp-player-time{color:var(--gpp-dim);font-variant-numeric:tabular-nums;font-size:12px;width:64px;text-align:right}
-.gpp-play-badge{position:absolute;right:8px;bottom:8px;z-index:3;width:34px;height:34px;border-radius:50%;border:0;background:var(--gpp-accent);color:#fff;
-cursor:pointer;display:grid;place-items:center;box-shadow:0 4px 12px rgba(0,0,0,.35);opacity:.85}
-.gpp-play-badge:hover{opacity:1;transform:scale(1.06)}
-.gpp-play-badge svg{width:16px;height:16px}
+.gpp-player-ctrl .gpp-select{padding:3px 4px;font-size:12px}
+.gpp-player-time{color:var(--gpp-dim);font:12px var(--gpp-f-bold);font-variant-numeric:tabular-nums;width:74px;text-align:right}
+.gpp-inline{position:absolute;inset:0;z-index:4;background:#fff;border-radius:inherit;overflow:hidden}
+.gpp-inline canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.gpp-inline .gpp-player-ctrl{position:absolute;left:8px;right:8px;bottom:8px;padding:5px 6px;border-radius:10px;background:var(--gpp-head);
+box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 3px 0 rgba(23,5,87,.5);opacity:0;transform:translateY(6px);transition:opacity .15s,transform .15s}
+.gpp-inline:hover .gpp-player-ctrl,.gpp-inline.paused .gpp-player-ctrl{opacity:1;transform:none}
+.gpp-play-badge{position:absolute;right:8px;bottom:8px;z-index:3;height:34px;padding:0 12px 0 9px;border-radius:9px;border:0;cursor:pointer;display:flex;align-items:center;gap:5px;
+background:linear-gradient(#8dffd0,#3ee6a0);color:rgb(23,5,87);font:13px/1 var(--gpp-f-black);text-transform:uppercase;box-shadow:inset 0 0 0 2px #c8ffe8,0 3px 0 #1f9e6c;opacity:.92}
+.gpp-play-badge:hover{opacity:1;filter:brightness(1.05)}
+.gpp-play-badge svg{width:14px;height:14px}
 .gpp-rec{color:#ff5a7a !important}
 `;
 
@@ -2274,12 +2460,13 @@ function partialStroke(v, k) {
   return v.slice(0, 3 + 2 * Math.max(1, Math.floor(k - STROKE_GAP)));
 }
 
+/* Плеер работает в двух видах: прямо в карточке рисунка альбома (host) или в отдельном окне. */
 class Player {
-  constructor(strokes, { title, W = 1516, H = 848 }) {
+  constructor(strokes, { title, W = 1516, H = 848, host = null }) {
     this.strokes = strokes.filter(Array.isArray);
     this.costs = this.strokes.map(strokeCost);
     this.total = this.costs.reduce((a, b) => a + b, 0) || 1;
-    this.W = W; this.H = H;
+    this.W = W; this.H = H; this.title = title;
     this.t = 0; this.done = 0; this.playing = false;
     this.layer = h('canvas', { width: W, height: H });
     this.lctx = this.layer.getContext('2d');
@@ -2292,20 +2479,51 @@ class Player {
     this.time = h('span', { class: 'gpp-player-time' });
     this.speed = UI.select(String(Settings.get('player', 'speed')), [['0.25', '×0.25'], ['0.5', '×0.5'], ['1', '×1'], ['2', '×2'], ['4', '×4'], ['8', '×8'], ['16', '×16']], v => Settings.set('player', 'speed', +v));
     this.recBtn = h('button', { class: 'gpp-icon-btn', title: 'Записать видео WebM', html: ICON.video, onclick: () => this.record() });
-
-    this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + (title || 'Таймлапс'), width: 560, height: 420, x: 120, y: 80, resizable: true, className: 'gpp-player' });
-    this.win.body.append(this.canvas, h('div', { class: 'gpp-player-ctrl' },
+    this.ctrl = h('div', { class: 'gpp-player-ctrl' },
       this.playBtn,
       h('button', { class: 'gpp-icon-btn', title: 'С начала', html: ICON.restart, onclick: () => { this.seekTo(0); this.play(); } }),
       this.seek, this.time, this.speed,
       h('button', { class: 'gpp-icon-btn', title: 'Сохранить PNG', html: ICON.download, onclick: () => this.savePng() }),
-      this.recBtn));
-    this.win.body.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); this.toggle(); } });
-    this.win.body.tabIndex = 0;
-    this.win.on('hide', () => { this.pause(); this.recorder?.stop(); this.win.el.remove(); Timelapse.current = null; });
-    this.win.show();
+      this.recBtn);
+
+    if (host) {
+      this.root = h('div', { class: 'gpp gpp-inline paused' }, this.canvas, this.ctrl);
+      this.ctrl.append(
+        h('button', { class: 'gpp-icon-btn', title: 'Открыть в большом окне', html: ICON.target, onclick: () => this.popOut() }),
+        h('button', { class: 'gpp-icon-btn', title: 'Закрыть плеер', html: ICON.close, onclick: () => this.close() }));
+      for (const t of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick']) this.root.addEventListener(t, e => e.stopPropagation());
+      this.root.addEventListener('click', e => { if (e.target === this.canvas) this.toggle(); });
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+      host.append(this.root);
+    } else {
+      this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + (title || 'Таймлапс'), width: 640, height: 450, x: 120, y: 80, resizable: true, className: 'gpp-player gpp' });
+      this.win.body.append(this.canvas, this.ctrl);
+      this.win.body.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); this.toggle(); } });
+      this.win.body.tabIndex = 0;
+      this.win.on('hide', () => this.close());
+      this.win.show();
+    }
     this.seekTo(Settings.get('player', 'autoplay') ? 0 : this.total);
     if (Settings.get('player', 'autoplay')) this.play();
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.pause();
+    if (this.recorder?.state === 'recording') this.recorder.stop();
+    this.root?.remove();
+    if (this.win) { this.win.el.remove(); }
+    if (Timelapse.current === this) Timelapse.current = null;
+  }
+
+  popOut() {
+    const t = this.t;
+    this.close();
+    Timelapse.current = new Player(this.strokes, { title: this.title, W: this.W, H: this.H });
+    Timelapse.current.pause();
+    Timelapse.current.seekTo(t);
+    Timelapse.current.play();
   }
 
   seekTo(t) {
@@ -2347,6 +2565,7 @@ class Player {
     if (this.t >= this.total) this.seekTo(0);
     this.playing = true;
     this.playBtn.innerHTML = ICON.pause;
+    this.root?.classList.remove('paused');
     let last = performance.now();
     const step = now => {
       if (!this.playing) return;
@@ -2358,7 +2577,7 @@ class Player {
     this.raf = requestAnimationFrame(step);
   }
 
-  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; }
+  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; this.root?.classList.add('paused'); }
   toggle() { this.playing ? this.pause() : this.play(); }
 
   savePng() {
@@ -2412,9 +2631,10 @@ const Timelapse = new (class {
     requestAnimationFrame(() => { this.pending = false; this.decorate(); });
   }
 
-  /* Возвращает { strokes, title, W, H } для элемента, по которому кликнули, или null */
+  /* Возвращает { strokes, title, W, H, host } для элемента, по которому кликнули, или null.
+     host — область рисунка в карточке альбома, куда встраивается плеер. */
   findTarget(el) {
-    if (!el || el.closest?.('.gpp-win, .gpp-stage')) return null;
+    if (!el || el.closest?.('.gpp-win, .gpp-stage, .gpp-inline')) return null;
     const item = el.closest?.('.timeline .item');
     if (item) {
       const items = [...document.querySelectorAll('.timeline .item')];
@@ -2422,10 +2642,11 @@ const Timelapse = new (class {
       const data = Net.album.items[idx];
       if (!data || !Array.isArray(data.data)) return null;
       const cv = item.querySelector('canvas');
-      return { strokes: data.data, title: `${data.user?.nick || ''} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848 };
+      const host = item.querySelector('.balloon .content') || cv?.parentElement || null;
+      return { strokes: data.data, title: `${data.user?.nick || ''} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848, host };
     }
     if (Net.state.screen === SCREEN.DESCRIPTION && el.tagName === 'CANVAS' && Array.isArray(Net.state.previous?.data)) {
-      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848 };
+      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848, host: null };
     }
     return null;
   }
@@ -2437,10 +2658,10 @@ const Timelapse = new (class {
     this.open(t);
   }
 
-  open({ strokes, title, W, H }) {
+  open({ strokes, title, W, H, host }) {
     if (!strokes?.length) return toast('В этом рисунке нет штрихов');
-    this.current?.win.hide();
-    this.current = new Player(strokes, { title, W, H });
+    this.current?.close();
+    this.current = new Player(strokes, { title, W, H, host });
   }
 
   decorate() {
@@ -2448,10 +2669,10 @@ const Timelapse = new (class {
     items.forEach((item, idx) => {
       const data = Net.album.items[idx];
       if (!data || !Array.isArray(data.data) || item.querySelector('.gpp-play-badge')) return;
-      const host = item.querySelector('.drawingmode') || item;
+      const host = item.querySelector('.balloon') || item.querySelector('.drawingmode') || item;
       if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
       host.append(h('button', {
-        class: 'gpp-play-badge', title: 'Таймлапс: как это рисовали', html: ICON.play,
+        class: 'gpp-play-badge gpp', title: 'Таймлапс: как это рисовали (двойной клик по рисунку)', html: ICON.play + '<span>Таймлапс</span>',
         onclick: e => { e.stopPropagation(); this.open(this.findTarget(item)); },
       }));
     });
@@ -2461,15 +2682,11 @@ const Timelapse = new (class {
 
 const Menu = new (class {
   init() {
-    this.fab = h('button', { class: 'gpp-fab gpp', title: 'Gartic Phone Plus', onclick: () => this.toggle() }, h('i', {}, '+'), 'GP+');
-    document.body.append(this.fab);
-    this.win = new Win({ id: 'menu', title: '<b>Gartic Phone Plus</b> 1.0', width: 440, height: 560, x: window.innerWidth - 470, y: window.innerHeight - 640, resizable: true });
-    this.win.body.style.padding = '0';
+    this.modal = new GameModal({ title: '<b>GP+</b> Gartic Phone Plus', width: 640, height: 600, className: 'gpp-menu' });
+    this.modal.body.style.cssText = 'padding:0;display:flex;flex-direction:column;overflow:hidden';
     this.tabsEl = h('div', { class: 'gpp-tabs' });
-    this.content = h('div', { class: 'gpp-win-body' });
-    this.win.body.style.display = 'flex';
-    this.win.body.style.flexDirection = 'column';
-    this.win.body.append(this.tabsEl, this.content);
+    this.content = h('div', { class: 'gpp-dialog-body gpp-scroll', style: { background: 'var(--gpp-head)', margin: '0 12px 12px', borderRadius: '0 9px 9px 9px' } });
+    this.modal.body.append(this.tabsEl, this.content);
     this.tabs = [
       ['Рисование', () => this.painterTab()],
       ['Клавиши', () => this.keysTab()],
@@ -2478,16 +2695,65 @@ const Menu = new (class {
       ['Общее', () => this.generalTab()],
     ];
     this.current = Store.get('menu.tab', 0);
-    this.renderTabs();
+    this.entry = h('button', { class: 'gpp-entry gpp', title: 'Gartic Phone Plus: настройки', html: ICON.gear + '<span>GP+</span>', onclick: e => { e.stopPropagation(); this.toggle(); } });
+    this.placeEntry();
+    new MutationObserver(() => this.placeEntrySoon()).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', () => this.placeEntrySoon());
   }
 
-  toggle() { this.win.toggle(); if (this.win.visible) this.open(this.current); }
+  /* Кнопка GP+ встаёт в шапку текущего экрана слева от кнопок звука и полноэкранного режима */
+  placeEntrySoon() {
+    if (this.placing) return;
+    this.placing = true;
+    requestAnimationFrame(() => { this.placing = false; this.placeEntry(); });
+  }
+
+  placeEntry() {
+    const sound = [...document.querySelectorAll('button.sound')].find(b => b.offsetParent);
+    const lang = !sound && [...document.querySelectorAll('.button-language')].find(b => b.offsetParent);
+    if (lang) {
+      // Главная страница: кнопки звука нет, GP+ встаёт справа от кнопки выбора языка
+      clearTimeout(this.fallbackTimer);
+      const parent = lang.parentElement;
+      const left = lang.offsetLeft + lang.offsetWidth + 10, top = lang.offsetTop + (lang.offsetHeight - 28) / 2;
+      if (this.entry.parentElement === parent && this.entry.style.left === left + 'px') return;
+      this.entry.classList.remove('floating');
+      this.entry.style.cssText = `left:${left}px;top:${top}px`;
+      if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+      parent.append(this.entry);
+      return;
+    }
+    if (!sound) {
+      clearTimeout(this.fallbackTimer);
+      if (!this.entry.isConnected || !this.entry.classList.contains('floating'))
+        this.fallbackTimer = setTimeout(() => { if (![...document.querySelectorAll('button.sound')].some(b => b.offsetParent)) { this.entry.classList.add('floating'); this.entry.style.cssText = ''; document.body.append(this.entry); } }, 1200);
+      return;
+    }
+    clearTimeout(this.fallbackTimer);
+    const parent = sound.parentElement;
+    const icons = [...parent.children].filter(el => el.tagName === 'BUTTON' && el !== this.entry && Math.abs(el.offsetTop - sound.offsetTop) < 12 && el.offsetLeft >= sound.offsetLeft - 120);
+    const left = Math.min(...icons.map(el => el.offsetLeft));
+    const right = parent.clientWidth - left + 8;
+    const top = sound.offsetTop + (sound.offsetHeight - 28) / 2;
+    if (this.entry.parentElement === parent && this.entry.style.right === right + 'px' && this.entry.style.top === top + 'px') return;
+    this.entry.classList.remove('floating');
+    this.entry.style.cssText = `right:${right}px;top:${top}px`;
+    if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+    parent.append(this.entry);
+  }
+
+  toggle() { this.modal.isOpen ? this.modal.close() : this.open(); }
+
+  open(i = this.current) {
+    if (!this.modal.isOpen) this.modal.open();
+    this.show(i);
+  }
 
   renderTabs() {
-    this.tabsEl.replaceChildren(...this.tabs.map(([name], i) => h('button', { class: 'gpp-tab' + (i === this.current ? ' on' : ''), onclick: () => this.open(i) }, name)));
+    this.tabsEl.replaceChildren(...this.tabs.map(([name], i) => h('button', { class: 'gpp-tab' + (i === this.current ? ' on' : ''), onclick: () => this.show(i) }, name)));
   }
 
-  open(i) {
+  show(i) {
     this.current = i;
     Store.set('menu.tab', i);
     this.renderTabs();
@@ -2501,7 +2767,10 @@ const Menu = new (class {
     return h('div', {},
       UI.sec('Основное'),
       UI.row('Расширенное рисование', 'Свой слой поверх холста: симметрия, зум, поворот, пипетка, заливка, горячие клавиши', B('enabled', 'switch')),
-      UI.row('Панель «Студия» в начале хода', 'Цвет, палитры, кисть, симметрия и вид. Клавиша H', B('studioOpen', 'switch')),
+      UI.row('Панели GP+ в интерфейсе игры', 'Цвет и палитры вместо родной палитры, симметрия и вид под инструментами. Клавиша H', UI.switch(!Store.get('panels.hidden', false), v => {
+        Store.set('panels.hidden', !v);
+        document.querySelector('.screen')?.classList.toggle('gpp-panels-hidden', !v);
+      })),
       UI.row('Подтверждать «Готово»', 'Спрашивать перед завершением хода', B('readyConfirm', 'switch')),
       UI.row('Курсор-кисть', 'Показывать размер кисти вместо обычного курсора', B('showCursor', 'switch')),
       UI.sec('В начале каждого хода'),
@@ -2526,7 +2795,7 @@ const Menu = new (class {
       UI.row('Шаг сетки', null, B('gridSize', 'slider', { min: 10, max: 200, step: 5, fmt: px })),
       UI.row('Яркость сетки', null, B('gridOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
       UI.row('Цвет осей симметрии', null, B('symmetryColor', 'color')),
-      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn', onclick: () => { Settings.reset('painter'); this.open(this.current); toast('Настройки рисования сброшены'); } }, 'Сбросить раздел')),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn', onclick: () => { Settings.reset('painter'); this.show(this.current); toast('Настройки рисования сброшены'); } }, 'Сбросить раздел')),
     );
   }
 
@@ -2540,7 +2809,7 @@ const Menu = new (class {
     return h('div', {},
       UI.sec('Окно референсов'),
       h('div', { class: 'gpp-note' }, 'Поиск картинок прямо в игре и плавающие окна с референсами поверх холста. Открыть: клавиша P во время рисования или кнопка ниже.'),
-      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => Reference.win.show() }, 'Открыть референсы')),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => { this.modal.close(); Reference.open(); } }, 'Открыть референсы')),
       UI.sec('Окна с картинками'),
       UI.row('Прозрачность по умолчанию', null, UI.bind('reference', 'frameOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
       h('div', { class: 'gpp-note' }, 'В окне картинки: колесо — масштаб, перетаскивание — сдвиг, двойной клик — вписать. Кнопка-булавка делает окно «прозрачным для мыши»: можно рисовать сквозь него.'),
@@ -2565,7 +2834,7 @@ const Menu = new (class {
         Settings.importAll(JSON.parse(await file.files[0].text()));
         applyTheme();
         toast('Настройки импортированы. Часть изменений применится после перезагрузки страницы.');
-        this.open(this.current);
+        this.show(this.current);
       } catch (e) { toast('Ошибка импорта: ' + e.message, 4000); }
       file.value = '';
     });
@@ -2580,10 +2849,10 @@ const Menu = new (class {
         h('button', { class: 'gpp-btn', onclick: () => file.click() }, 'Импорт'), file,
         h('button', { class: 'gpp-btn danger', onclick: async () => {
           if (!(await confirmDialog('Сбросить всё?', 'Настройки, клавиши и положение окон вернутся к исходным. Ваши палитры сохранятся.', 'Сбросить'))) return;
-          Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.open(this.current); toast('Сброшено');
+          Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.show(this.current); toast('Сброшено');
         } }, 'Сбросить всё')),
       UI.sec('О скрипте'),
-      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.0. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
+      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.1. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
       h('div', { class: 'gpp-note' }, 'Состояние: ' + (Net.connected ? 'подключено к игре' : 'ожидание подключения к комнате')),
     );
   }
@@ -2604,8 +2873,8 @@ onReady(() => {
   Timelapse.init();
   Menu.init();
   if (Net.state.screen === SCREEN.DRAW) Painter.scheduleAttach();
-  if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse };
-  console.log('[GP+] Gartic Phone Plus 1.0 загружен');
+  if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse, Menu };
+  console.log('[GP+] Gartic Phone Plus 1.1 загружен');
 });
 
 })();

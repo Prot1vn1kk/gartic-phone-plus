@@ -290,7 +290,6 @@ const PAINTER_CSS = `
 .gpp-details summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--gpp-dim);font-weight:700;list-style:none;margin-bottom:6px}
 .gpp-details summary::before{content:"▸ ";}
 .gpp-details[open] summary::before{content:"▾ ";}
-.gpp-studio .gpp-win-body{padding:12px}
 `;
 
 const Painter = new (class extends Emitter {
@@ -327,7 +326,7 @@ const Painter = new (class extends Emitter {
     });
     Net.on('queue', n => this.updateHud(n));
     Settings.on('painter.enabled', on => { if (!on) this.detach(); else if (Net.state.screen === SCREEN.DRAW) this.scheduleAttach(); });
-    this.studio = new Studio(this);
+    this.ui = new GameUI(this);
   }
 
   async scheduleAttach() {
@@ -383,14 +382,18 @@ const Painter = new (class extends Emitter {
     this.bindGameUi();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.stage);
-    this.guard = new MutationObserver(() => { if (this.active && !this.stage.isConnected) this.scheduleAttach(); });
+    // React может перерисовать части экрана: слой или встроенные панели тогда монтируются заново
+    this.guard = new MutationObserver(() => {
+      if (!this.active) return;
+      if (!this.stage.isConnected) return this.scheduleAttach();
+      if (!this.ui.mounted && document.querySelector('.colors')) this.ui.mount();
+    });
     this.guard.observe(document.body, { childList: true, subtree: true });
     this.active = true;
     this.resize();
     this.syncGameUi();
+    this.ui.mount();
     this.emit('attach');
-    if (Settings.get('painter', 'studioOpen')) this.studio.win.show();
-    this.studio.refresh();
   }
 
   detach() {
@@ -404,7 +407,7 @@ const Painter = new (class extends Emitter {
     for (const c of this.gameCanvases || []) c.style.visibility = '';
     this.stage?.remove();
     this.stage = null;
-    this.studio.win.hide();
+    this.ui.unmount();
     this.picker?.hide();
     this.emit('detach');
   }
@@ -476,7 +479,7 @@ const Painter = new (class extends Emitter {
     this.view[key] = !this.view[key];
     if (key === 'gray') this.stage?.classList.toggle('gray', this.view.gray);
     this.render();
-    this.studio.refresh();
+    this.ui.refresh();
   }
 
   render() {
@@ -552,8 +555,12 @@ const Painter = new (class extends Emitter {
     c.restore();
   }
 
+  /* Индикаторы состояния: в шапке книги, а если шапки нет — в углу холста */
   updateHud(queueSize = Net.queue.length) {
     if (!this.hud) return;
+    const inHeader = !!this.ui?.chips?.isConnected;
+    this.hud.style.display = inHeader ? 'none' : '';
+    const target = inHeader ? this.ui.chips : this.hud;
     const chips = [];
     if (this.view.zoom !== 1) chips.push(round(this.view.zoom * 100) + '%');
     if (this.view.rot) chips.push('↻ ' + round(this.view.rot) + '°');
@@ -562,7 +569,7 @@ const Painter = new (class extends Emitter {
     if (this.view.gray) chips.push('Ч/Б');
     if (this.sym.on) chips.push('Симметрия: ' + SYM_NAMES[this.sym.mode]);
     if (queueSize) chips.push('Отправка: ' + queueSize);
-    this.hud.replaceChildren(...chips.map(t => h('span', { class: 'gpp-chip' + (t.startsWith('Отправка') ? ' accent' : '') }, t)));
+    target.replaceChildren(...chips.map(t => h('span', { class: 'gpp-chip' + (t.startsWith('Отправка') ? ' accent' : '') }, t)));
   }
 
   /* ───── Состояние инструмента ───── */
@@ -570,7 +577,7 @@ const Painter = new (class extends Emitter {
   setTool(t) {
     this.tool = t;
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
@@ -578,7 +585,7 @@ const Painter = new (class extends Emitter {
     if (!Color.valid(hex)) return;
     this.color = Color.norm(hex);
     if (addRecent) this.pushRecent(this.color);
-    this.studio?.refresh();
+    this.ui?.refresh();
     this.render();
   }
 
@@ -590,17 +597,17 @@ const Painter = new (class extends Emitter {
   setThickness(v) {
     this.thickness = clamp(round(v), 1, Settings.get('painter', 'maxThickness'));
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
   setOpacity(v) {
     this.opacity = clamp(round(v), 1, 10);
     this.syncGameUi();
-    this.studio.refresh();
+    this.ui.refresh();
   }
 
-  swapColors() { [this.color, this.color2] = [this.color2, this.color]; this.studio.refresh(); this.render(); }
+  swapColors() { [this.color, this.color2] = [this.color2, this.color]; this.ui.refresh(); this.render(); }
 
   eraserSize() { return Settings.get('painter', 'doubleEraser') ? this.thickness * 2 : this.thickness; }
 
@@ -859,7 +866,7 @@ const Painter = new (class extends Emitter {
     if (!c) return;
     if (secondary) this.color2 = c; else this.color = c;
     this.peekColor = c;
-    this.studio.refresh();
+    this.ui.refresh();
     this.render();
   }
 
@@ -897,7 +904,7 @@ const Painter = new (class extends Emitter {
       if (!el) return;
       if (el.classList.contains('undo')) { e.stopImmediatePropagation(); e.preventDefault(); return this.undo(); }
       if (el.classList.contains('redo')) { e.stopImmediatePropagation(); e.preventDefault(); return this.redo(); }
-      for (const [cls, id] of Object.entries(GAME_TOOL_CLASS)) if (el.classList.contains(cls)) { this.tool = id; this.studio.refresh(); }
+      for (const [cls, id] of Object.entries(GAME_TOOL_CLASS)) if (el.classList.contains(cls)) { this.tool = id; this.ui.refresh(); }
     }, true);
     const opts = document.querySelector('.options');
     if (opts) {
@@ -991,11 +998,11 @@ const Painter = new (class extends Emitter {
     R('redo', 'Повторить', ['Ctrl+KeyY', 'Ctrl+Shift+KeyZ'], { ...G4, repeat: true });
     R('save', 'Сохранить PNG', ['Ctrl+KeyS'], G4);
     R('clear', 'Очистить холст', ['Shift+Delete'], G4);
-    R('studio', 'Панель «Студия»', ['KeyH'], G4);
+    R('studio', 'Показать / скрыть панели GP+', ['KeyH'], G4);
     R('reference', 'Окно референсов', ['KeyP'], { group: 'Окна' });
 
     Hotkeys.on('tap', id => {
-      if (id === 'reference') return Reference.win.toggle();
+      if (id === 'reference') return Reference.toggle();
       if (!this.active) return;
       const T = { brush: TOOL.PEN, eraser: TOOL.ERASER, line: TOOL.LINE, rect: TOOL.RECT, rectFill: TOOL.RECT_FILL, ellipse: TOOL.ELLIPSE, ellipseFill: TOOL.ELLIPSE_FILL, fill: TOOL.FILL };
       if (T[id]) return this.setTool(T[id]);
@@ -1018,12 +1025,12 @@ const Painter = new (class extends Emitter {
         case 'mirrorY': this.toggleView('mirrorY'); break;
         case 'gray': this.toggleView('gray'); break;
         case 'grid': this.toggleView('grid'); break;
-        case 'symmetry': this.sym.on = !this.sym.on; this.studio.refresh(); this.render(); break;
+        case 'symmetry': this.sym.on = !this.sym.on; this.ui.refresh(); this.render(); break;
         case 'undo': this.undo(); break;
         case 'redo': this.redo(); break;
         case 'save': this.saveImage(); break;
         case 'clear': this.clearAll(); break;
-        case 'studio': this.studio.win.toggle(); Settings.set('painter', 'studioOpen', this.studio.win.visible); break;
+        case 'studio': this.ui.togglePanels(); break;
       }
       this.updateHud();
     });
@@ -1051,103 +1058,229 @@ const Painter = new (class extends Emitter {
   }
 })();
 
-/* ───────────────────────────── Панель «Студия» ───────────────────────────── */
+/* ───────────────────────────── Встраивание в интерфейс игры ─────────────────────────────
+   Левая колонка игры (.colors): своя панель цвета вместо родной палитры.
+   Правая колонка (.tools): блок симметрии и вида под инструментами игры.
+   Шапка книги (.header): кнопки «Настройки» и «Референсы», индикаторы состояния.
+   Всё вставляется внутрь .screen, поэтому масштабируется вместе с игрой.            */
 
-class Studio {
+const GAMEUI_CSS = `
+.gpp-col{width:129px;padding:8px;border-radius:9px;background:var(--gpp-panel-bg);border:1.6px solid var(--gpp-panel-border);
+box-shadow:0 0 0 3px var(--gpp-panel-shadow);display:flex;flex-direction:column;gap:7px;color:#fff;font:11px/1.2 var(--gpp-f-bold);user-select:none}
+.gpp-col *{box-sizing:border-box}
+.gpp-right{margin-top:16px}
+.gpp-panels-hidden .gpp-col,.gpp-panels-hidden .gpp-hdr{display:none}
+.gpp-panels-hidden .colors .content.gpp-native-hidden{display:flex !important}
+.gpp-tgrid{display:grid;grid-template-columns:repeat(3,30px);justify-content:space-between;gap:8px 0}
+.gpp-tbtn{position:relative;width:30px;height:30px;border-radius:7px;border:1.6px solid #fff;box-shadow:0 0 0 2px var(--gpp-tool-ring);background:transparent;
+color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;font:12px/1 var(--gpp-f-black)}
+.gpp-tbtn:hover{background:rgba(255,255,255,.18)}
+.gpp-tbtn.on{background:#fff;color:var(--gpp-tool-ring)}
+.gpp-tbtn svg{width:19px;height:19px}
+.gpp-tbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
+background:var(--gpp-edge);color:#fff;font:11px/1 var(--gpp-f-bold);padding:6px 8px;border-radius:6px;pointer-events:none;z-index:50}
+.gpp-left .gpp-tbtn[data-tip]:hover::after{right:auto;left:calc(100% + 8px)}
+.gpp-sep{height:1px;background:var(--gpp-panel-border);margin:1px 0}
+.gpp-colhead{display:flex;align-items:center;gap:6px}
+.gpp-pair{position:relative;width:40px;height:36px;flex:none;cursor:pointer}
+.gpp-pair span{position:absolute;width:26px;height:26px;border-radius:6px;border:1.6px solid rgb(67,17,31);box-shadow:0 0 0 2px #fff}
+.gpp-pair .c1{left:2px;top:2px;z-index:1}.gpp-pair .c2{right:2px;bottom:2px}
+.gpp-hex{width:100%;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:11px var(--gpp-f-bold);padding:4px 5px;outline:none;text-transform:uppercase}
+.gpp-hex:focus{border-color:#fff}
+.gpp-col .gpp-cp{gap:6px}
+.gpp-col .gpp-cp canvas{border-radius:6px;box-shadow:0 0 0 1.6px rgba(255,255,255,.7)}
+.gpp-col .gpp-cp-huewrap canvas{height:10px;border-radius:5px}
+.gpp-col .gpp-cp-hmark{height:16px}
+.gpp-rangebox{display:flex;align-items:center;gap:5px}
+.gpp-rangebox input{flex:1;min-width:0;accent-color:#fff;height:14px}
+.gpp-rangebox b{width:26px;text-align:right;font:11px var(--gpp-f-black)}
+.gpp-palbar{display:flex;align-items:center;gap:3px}
+.gpp-palbar select{flex:1;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:10.5px var(--gpp-f-bold);padding:3px 2px;outline:none}
+.gpp-palbar select option{background:var(--gpp-field)}
+.gpp-palbar button{width:20px;height:20px;border:0;border-radius:5px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
+.gpp-palbar button:hover{background:rgba(255,255,255,.3)}
+.gpp-palbar svg{width:13px;height:13px}
+.gpp-swgrid{display:grid;grid-template-columns:repeat(5,18px);justify-content:space-between;gap:5px 0;max-height:118px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
+.gpp-swgrid::-webkit-scrollbar{width:4px}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
+.gpp-col .gpp-sw{width:18px;height:18px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
+.gpp-col .gpp-sw:hover{transform:scale(1.12)}
+.gpp-col .gpp-sw.sel{box-shadow:0 0 0 2.5px var(--gpp-accent)}
+.gpp-recent{grid-template-columns:repeat(5,18px);max-height:none}
+.gpp-hdr{position:absolute;left:56px;top:10px;display:flex;gap:4px;z-index:6}
+.gpp-hbtn{width:32px;height:30px;border:0;background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;border-radius:7px}
+.gpp-hbtn:hover{background:rgba(255,255,255,.14)}
+.gpp-hbtn.on{background:var(--gpp-accent);color:var(--gpp-edge)}
+.gpp-hbtn svg{width:25px;height:25px;filter:drop-shadow(0 2px 0 rgba(23,5,87,.7))}
+.gpp-hbtn svg *{stroke-width:2.1}
+.gpp-chips{position:absolute;left:16px;top:50px;display:flex;flex-wrap:wrap;gap:4px;max-width:215px;z-index:6;pointer-events:none}
+.gpp-chips .gpp-chip{background:rgba(23,5,87,.55);color:#fff;font:11px/1 var(--gpp-f-bold);border-radius:999px;padding:5px 8px}
+.gpp-chips .gpp-chip.accent{background:var(--gpp-accent);color:var(--gpp-edge)}
+`;
+
+class GameUI {
   constructor(p) {
     this.p = p;
-    this.win = new Win({ id: 'studio', title: '<b>GP+</b> Студия', width: 268, x: 16, y: 90, className: 'gpp-studio' });
-    this.win.on('hide', () => { if (p.active) Settings.set('painter', 'studioOpen', false); });
-    this.win.on('show', () => { if (p.active) Settings.set('painter', 'studioOpen', true); });
-    this.build();
+    this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
+    this.palName = Store.get('palette.current', 'Gartic');
+    this.gamePalette = [];
+    injectCss(GAMEUI_CSS, 'gpp-gameui-css');
   }
 
-  build() {
-    const p = this.p, b = this.win.body;
-    this.sw = h('div', { class: 'gpp-swatch2', title: 'Основной / дополнительный (ПКМ рисует доп. цветом). Клик — поменять', onclick: () => p.swapColors() },
-      this.c1 = h('span', { class: 'c1' }), this.c2 = h('span', { class: 'c2' }));
-    this.hex = h('input', { class: 'gpp-input', style: { width: '92px' }, maxlength: 7, spellcheck: 'false' });
-    this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
-    this.toolName = h('div', { class: 'gpp-note', style: { margin: 0 } });
-    b.append(h('div', { class: 'gpp-colors-top' }, this.sw, h('div', {}, this.hex, this.toolName)));
+  get mounted() { return !!this.left?.isConnected; }
 
-    this.cp = new ColorPicker({ width: 240, height: 140 });
+  mount() {
+    this.unmount();
+    const screen = document.querySelector('.screen');
+    const colors = document.querySelector('.colors');
+    const tools = document.querySelector('.tools');
+    const header = document.querySelector('.book .header');
+    if (!screen) return;
+    this.screen = screen;
+    this.copyTheme();
+    if (colors) {
+      const native = colors.querySelector('.content');
+      this.gamePalette = [...colors.querySelectorAll('.color')].map(c => (getComputedStyle(c).backgroundColor.match(/\d+/g) || []).slice(0, 3))
+        .filter(a => a.length === 3).map(a => Color.rgbToHex(+a[0], +a[1], +a[2]));
+      if (native) { native.classList.add('gpp-native-hidden'); native.style.display = 'none'; this.native = native; }
+      this.left = this.buildLeft();
+      colors.append(this.left);
+    }
+    if (tools) { this.right = this.buildRight(); tools.append(this.right); }
+    if (header) {
+      this.hdr = h('div', { class: 'gpp-hdr gpp' },
+        this.hbtn(ICON.gear, 'Настройки GP+', () => Menu.open()),
+        this.refBtn = this.hbtn(ICON.image, 'Референсы (P)', () => Reference.toggle()));
+      this.chips = h('div', { class: 'gpp-chips gpp' });
+      header.append(this.hdr, this.chips);
+    }
+    screen.classList.toggle('gpp-panels-hidden', !!Store.get('panels.hidden', false));
+    this.refresh();
+    this.p.updateHud();
+  }
+
+  unmount() {
+    for (const el of [this.left, this.right, this.hdr, this.chips]) el?.remove();
+    if (this.native) { this.native.style.display = ''; this.native.classList.remove('gpp-native-hidden'); }
+    this.screen?.classList.remove('gpp-panels-hidden');
+    this.left = this.right = this.hdr = this.chips = this.native = null;
+  }
+
+  togglePanels() {
+    const hidden = !Store.get('panels.hidden', false);
+    Store.set('panels.hidden', hidden);
+    this.screen?.classList.toggle('gpp-panels-hidden', hidden);
+    toast(hidden ? 'Панели GP+ скрыты (H — вернуть)' : 'Панели GP+ показаны');
+  }
+
+  /* Цвета панелей берутся с колонки инструментов: у разных экранов игры своя гамма */
+  copyTheme() {
+    const panel = document.querySelector('.tools > div'), tool = document.querySelector('.tools .tool');
+    const st = this.screen.style;
+    if (panel) {
+      const cs = getComputedStyle(panel);
+      st.setProperty('--gpp-panel-bg', cs.backgroundColor);
+      st.setProperty('--gpp-panel-border', cs.borderTopColor);
+      const sh = cs.boxShadow.match(/rgba?\([^)]+\)/);
+      if (sh) st.setProperty('--gpp-panel-shadow', sh[0]);
+    }
+    if (tool) {
+      const ring = getComputedStyle(tool).boxShadow.match(/rgba?\([^)]+\)/);
+      if (ring) st.setProperty('--gpp-tool-ring', ring[0]);
+    }
+  }
+
+  hbtn(icon, tip, onclick) {
+    return h('button', { class: 'gpp-hbtn', title: tip, html: icon, onclick: e => { e.stopPropagation(); onclick(); } });
+  }
+
+  tbtn(icon, tip, onclick, data = {}) {
+    return h('button', { class: 'gpp-tbtn', 'data-tip': tip, html: icon, dataset: data, onclick: e => { e.stopPropagation(); onclick(e); } });
+  }
+
+  stop(el) {
+    for (const t of ['pointerdown', 'mousedown', 'click', 'wheel', 'keydown']) el.addEventListener(t, e => e.stopPropagation());
+    return el;
+  }
+
+  buildLeft() {
+    const p = this.p;
+    this.c1 = h('span', { class: 'c1' }); this.c2 = h('span', { class: 'c2' });
+    this.hex = h('input', { class: 'gpp-hex', maxlength: 7, spellcheck: 'false', title: 'HEX-код цвета' });
+    this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
+    this.cp = new ColorPicker({ width: 111, height: 78 });
     this.cp.on('input', hex => p.setColor(hex, false));
     this.cp.on('commit', hex => p.pushRecent(hex));
-    b.append(this.cp.el);
-
-    this.recentRow = h('div', { class: 'gpp-sw-row', style: { marginTop: '8px' } });
-    b.append(this.recentRow);
-
-    /* Гармонии */
-    this.harmMode = Store.get('harmony', 'complementary');
-    this.harmRow = h('div', { class: 'gpp-sw-row' });
-    const harmSel = UI.select(this.harmMode, [['complementary', 'Комплементарные'], ['triad', 'Триада'], ['analog', 'Аналоговые'], ['tetrad', 'Тетрада'], ['shades', 'Оттенки']],
-      v => { this.harmMode = v; Store.set('harmony', v); this.refresh(); });
-    harmSel.style.width = '100%';
-    b.append(this.details('Цветовой круг', harmSel, h('div', { style: { height: '6px' } }), this.harmRow));
-
-    /* Палитры */
-    this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
-    this.palName = Store.get('palette.current', 'Базовая');
-    this.palSel = h('select', { class: 'gpp-select', style: { flex: 1, minWidth: 0 } });
+    this.size = h('input', { type: 'range', min: 1, step: 1, title: 'Толщина кисти' });
+    this.size.addEventListener('input', () => p.setThickness(+this.size.value));
+    this.sizeVal = h('b');
+    this.palSel = h('select', { title: 'Палитра' });
     this.palSel.addEventListener('change', () => { this.palName = this.palSel.value; Store.set('palette.current', this.palName); this.refresh(); });
-    this.palGrid = h('div', { class: 'gpp-sw-row' });
     const file = h('input', { type: 'file', accept: '.aco,.gpl,.txt,.hex', style: { display: 'none' } });
     file.addEventListener('change', () => this.importPalette(file.files[0]).finally(() => (file.value = '')));
-    b.append(this.details('Палитра',
-      h('div', { class: 'gpp-mini' }, this.palSel,
-        h('button', { class: 'gpp-icon-btn', title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
-        h('button', { class: 'gpp-icon-btn', title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
-        h('button', { class: 'gpp-icon-btn', title: 'Удалить палитру', html: ICON.trash, onclick: () => this.deletePalette() })),
-      this.palGrid, file, h('div', { class: 'gpp-note' }, 'ЛКМ — основной цвет, ПКМ — дополнительный, Shift+клик — удалить из своей палитры.')));
-
-    /* Кисть */
-    const mini = (label, min, max, step, get, set) => {
-      const out = h('output');
-      const inp = h('input', { type: 'range', min, max, step });
-      inp.addEventListener('input', () => set(+inp.value));
-      const row = h('div', { class: 'gpp-mini' }, h('label', {}, label), inp, out);
-      row.upd = () => { inp.max = typeof max === 'function' ? max() : max; inp.value = get(); out.textContent = get(); };
-      return row;
-    };
-    this.minis = [
-      mini('Толщина', 1, () => Settings.get('painter', 'maxThickness'), 1, () => p.thickness, v => p.setThickness(v)),
-      mini('Насыщенность', 1, 10, 1, () => p.opacity, v => p.setOpacity(v)),
-      mini('Сглаживание', 0, 8, 1, () => Settings.get('painter', 'smoothing'), v => { Settings.set('painter', 'smoothing', v); this.refresh(); }),
-    ];
-    this.toolSeg = h('div', { class: 'gpp-seg' });
-    for (const [id, short] of [[1, 'Кисть'], [2, 'Ластик'], [3, 'Линия'], [4, '▭'], [6, '■'], [5, '◯'], [7, '●'], [8, 'Заливка']])
-      this.toolSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { tool: id }, title: TOOL_NAMES[id], onclick: () => p.setTool(id) }, short));
-    b.append(this.details('Кисть', this.toolSeg, h('div', { style: { height: '6px' } }), ...this.minis));
-
-    /* Симметрия */
-    this.symSwitch = UI.switch(false, v => { p.sym.on = v; p.render(); p.updateHud(); });
-    this.symSeg = h('div', { class: 'gpp-seg' });
-    for (const [mode, short] of [[SYM.VERTICAL, '│'], [SYM.HORIZONTAL, '─'], [SYM.QUADRANT, '┼'], [SYM.RADIAL, 'Радиал'], [SYM.MANDALA, 'Мандала']])
-      this.symSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { mode }, title: SYM_NAMES[mode], onclick: () => { p.sym.mode = mode; p.sym.on = true; this.refresh(); p.render(); p.updateHud(); } }, short));
-    this.symCount = mini('Лучей', 2, 24, 1, () => p.symCount(), v => { Settings.set('painter', p.sym.mode === SYM.RADIAL ? 'radialCount' : 'mandalaCount', v); this.refresh(); p.render(); });
-    b.append(this.details('Симметрия', UI.row('Включена', null, this.symSwitch), this.symSeg, this.symCount));
-
-    /* Вид */
-    this.viewSeg = h('div', { class: 'gpp-seg' });
-    for (const [key, label] of [['mirrorX', 'Зеркало'], ['mirrorY', 'Зеркало ↕'], ['gray', 'Ч/Б'], ['grid', 'Сетка']])
-      this.viewSeg.append(h('button', { class: 'gpp-icon-btn', dataset: { key }, onclick: () => { p.toggleView(key); p.updateHud(); } }, label));
-    b.append(this.details('Вид', this.viewSeg, h('div', { class: 'gpp-btns' },
-      h('button', { class: 'gpp-btn', onclick: () => { p.resetView(); p.updateHud(); } }, 'Сбросить вид'),
-      h('button', { class: 'gpp-btn', onclick: () => p.saveImage() }, 'PNG'),
-      h('button', { class: 'gpp-btn danger', onclick: () => p.clearAll() }, 'Очистить'))));
+    this.palGrid = h('div', { class: 'gpp-swgrid' });
+    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent' });
+    return this.stop(h('div', { class: 'gpp-col gpp-left gpp' },
+      h('div', { class: 'gpp-colhead' },
+        h('div', { class: 'gpp-pair', title: 'Основной / дополнительный цвет (ПКМ рисует дополнительным). Клик — поменять (X)', onclick: () => p.swapColors() }, this.c1, this.c2),
+        this.hex),
+      this.cp.el,
+      h('div', { class: 'gpp-rangebox', title: 'Толщина кисти ([ и ])' }, this.size, this.sizeVal),
+      h('div', { class: 'gpp-sep' }),
+      h('div', { class: 'gpp-palbar' }, this.palSel,
+        h('button', { title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
+        h('button', { title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
+        file),
+      this.palGrid,
+      h('div', { class: 'gpp-sep' }),
+      this.recentGrid));
   }
 
-  details(title, ...content) {
-    const key = 'studio.open.' + title;
-    const d = h('details', { class: 'gpp-details' }, h('summary', {}, title), ...content);
-    if (Store.get(key, !['Цветовой круг', 'Вид'].includes(title))) d.open = true;
-    d.addEventListener('toggle', () => Store.set(key, d.open));
-    return d;
+  buildRight() {
+    const p = this.p;
+    const symBtn = (mode, icon, tip) => this.tbtn(icon, tip, () => {
+      if (p.sym.on && p.sym.mode === mode) p.sym.on = false;
+      else { p.sym.mode = mode; p.sym.on = true; }
+      this.refresh(); p.render(); p.updateHud();
+    }, { mode });
+    this.raysBtn = this.tbtn('', 'Лучей: колесо мыши или клик', e => this.changeRays(e.shiftKey ? -1 : 1));
+    this.raysBtn.addEventListener('wheel', e => { e.preventDefault(); this.changeRays(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+    this.raysBtn.addEventListener('contextmenu', e => { e.preventDefault(); this.changeRays(-1); });
+    const viewBtn = (key, icon, tip) => this.tbtn(icon, tip, () => { p.toggleView(key); p.updateHud(); }, { key });
+    this.symGrid = h('div', { class: 'gpp-tgrid' },
+      symBtn(SYM.VERTICAL, ICON.symV, 'Симметрия: вертикальная ось (T)'),
+      symBtn(SYM.HORIZONTAL, ICON.symH, 'Симметрия: горизонтальная ось'),
+      symBtn(SYM.QUADRANT, ICON.symQ, 'Симметрия: 4 четверти'),
+      symBtn(SYM.RADIAL, ICON.symR, 'Симметрия: радиальная'),
+      symBtn(SYM.MANDALA, ICON.symM, 'Симметрия: мандала'),
+      this.raysBtn);
+    this.viewGrid = h('div', { class: 'gpp-tgrid' },
+      viewBtn('mirrorX', ICON.mirror, 'Зеркальный вид (M)'),
+      viewBtn('mirrorY', ICON.mirrorY, 'Зеркальный вид по вертикали (Shift+M)'),
+      viewBtn('gray', ICON.gray, 'Чёрно-белый просмотр (W)'),
+      viewBtn('grid', ICON.grid, 'Сетка (G)'),
+      this.tbtn(ICON.target, 'Сбросить масштаб и поворот (A)', () => { p.resetView(); p.updateHud(); }),
+      this.tbtn(ICON.trash, 'Очистить холст (Shift+Delete)', () => p.clearAll()));
+    return this.stop(h('div', { class: 'gpp-col gpp-right gpp' }, this.symGrid, h('div', { class: 'gpp-sep' }), this.viewGrid));
   }
 
-  allPalettes() { return { ...BUILTIN_PALETTES, ...this.palettes }; }
+  changeRays(d) {
+    const p = this.p;
+    const key = p.sym.mode === SYM.MANDALA ? 'mandalaCount' : 'radialCount';
+    if (p.sym.mode !== SYM.RADIAL && p.sym.mode !== SYM.MANDALA) { p.sym.mode = SYM.RADIAL; p.sym.on = true; }
+    Settings.set('painter', key, clamp(Settings.get('painter', key) + d, 2, 24));
+    this.refresh(); p.render(); p.updateHud();
+  }
+
+  allPalettes() {
+    return { Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
+  }
+
+  harmony() {
+    const [hh, s, v] = Color.hexToHsv(this.p.color);
+    const at = d => Color.hsvToHex((hh + d + 1) % 1, s, v);
+    return [this.p.color, at(0.5), at(1 / 3), at(2 / 3), at(-1 / 12), at(1 / 12), at(0.25), at(0.75),
+      ...[0.25, 0.5, 0.75, 1].map(k => Color.hsvToHex(hh, s, k * Math.max(v, 0.3))), ...[0.3, 0.6].map(k => Color.hsvToHex(hh, s * k, v))];
+  }
 
   addToMine() {
     const mine = this.palettes['Мои цвета'] || (this.palettes['Мои цвета'] = []);
@@ -1157,14 +1290,6 @@ class Studio {
   }
 
   savePalettes() { Store.set('palettes', this.palettes); Store.set('palette.current', this.palName); this.refresh(); }
-
-  deletePalette() {
-    if (BUILTIN_PALETTES[this.palName]) return toast('Встроенную палитру удалить нельзя');
-    if (this.palName === 'Мои цвета') this.palettes['Мои цвета'] = [];
-    else delete this.palettes[this.palName];
-    this.palName = 'Базовая';
-    this.savePalettes();
-  }
 
   async importPalette(f) {
     if (!f) return;
@@ -1179,21 +1304,9 @@ class Studio {
     } catch (e) { toast('Не удалось прочитать палитру: ' + e.message); }
   }
 
-  harmony() {
-    const [hh, s, v] = Color.hexToHsv(this.p.color);
-    const at = d => Color.hsvToHex((hh + d + 1) % 1, s, v);
-    switch (this.harmMode) {
-      case 'complementary': return [this.p.color, at(0.5), Color.hsvToHex(hh, s * 0.5, v), Color.hsvToHex((hh + 0.5) % 1, s * 0.5, v), Color.hsvToHex(hh, s, v * 0.6)];
-      case 'triad': return [this.p.color, at(1 / 3), at(2 / 3)];
-      case 'analog': return [at(-1 / 12), at(-1 / 24), this.p.color, at(1 / 24), at(1 / 12)];
-      case 'tetrad': return [this.p.color, at(0.25), at(0.5), at(0.75)];
-      default: return [0.2, 0.4, 0.6, 0.8, 1].map(k => Color.hsvToHex(hh, s, k)).concat([0.25, 0.5, 0.75].map(k => Color.hsvToHex(hh, s * k, v)));
-    }
-  }
-
-  swatch(hex, { removable } = {}) {
+  swatch(hex, removable) {
     return h('div', {
-      class: 'gpp-sw' + (hex === this.p.color ? ' sel' : ''), title: hex, style: { background: hex },
+      class: 'gpp-sw' + (hex === this.p.color ? ' sel' : ''), title: hex + (removable ? ' (Shift+клик — удалить)' : ''), style: { background: hex },
       onclick: e => {
         if (e.shiftKey && removable) { this.palettes[this.palName] = this.palettes[this.palName].filter(c => c !== hex); return this.savePalettes(); }
         this.p.setColor(hex);
@@ -1204,26 +1317,29 @@ class Studio {
 
   refresh() {
     const p = this.p;
-    if (!this.win) return;
+    if (!this.mounted) return;
     this.c1.style.background = p.color;
     this.c2.style.background = p.color2;
     if (document.activeElement !== this.hex) this.hex.value = p.color;
-    this.toolName.textContent = TOOL_NAMES[p.tool] + ' · ' + p.thickness + 'px';
     if (!this.cp.dragging) this.cp.set(p.color);
-    this.recentRow.replaceChildren(...p.recent.map(c => this.swatch(c)));
-    this.harmRow.replaceChildren(...this.harmony().map(c => this.swatch(c)));
+    this.size.max = Settings.get('painter', 'maxThickness');
+    this.size.value = p.thickness;
+    this.sizeVal.textContent = p.thickness;
     const all = this.allPalettes();
-    if (!all[this.palName]) this.palName = 'Базовая';
+    if (!all[this.palName]) this.palName = 'Gartic';
     this.palSel.replaceChildren(...Object.keys(all).map(n => h('option', { value: n, selected: n === this.palName }, n)));
-    const removable = !BUILTIN_PALETTES[this.palName];
-    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, { removable })));
-    if (!all[this.palName].length) this.palGrid.append(h('div', { class: 'gpp-note' }, 'Пусто. Нажмите «+», чтобы добавить текущий цвет.'));
-    this.minis.forEach(m => m.upd());
-    this.toolSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.tool === p.tool));
-    this.symSwitch.set(p.sym.on);
-    this.symSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.mode === p.sym.mode));
-    this.symCount.style.display = p.sym.mode === SYM.RADIAL || p.sym.mode === SYM.MANDALA ? '' : 'none';
-    this.symCount.upd();
-    this.viewSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', !!p.view[b.dataset.key]));
+    const removable = !!this.palettes[this.palName];
+    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
+    if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
+    this.recentGrid.replaceChildren(...p.recent.slice(0, 10).map(c => this.swatch(c)));
+    this.recentGrid.style.display = p.recent.length ? '' : 'none';
+    if (this.right) {
+      this.symGrid.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', p.sym.on && b.dataset.mode === p.sym.mode));
+      const rays = p.sym.mode === SYM.RADIAL || p.sym.mode === SYM.MANDALA;
+      this.raysBtn.textContent = rays ? p.symCount() : '';
+      if (!rays) this.raysBtn.innerHTML = ICON.rays;
+      this.viewGrid.querySelectorAll('[data-key]').forEach(b => b.classList.toggle('on', !!p.view[b.dataset.key]));
+    }
+    this.refBtn?.classList.toggle('on', Reference.isOpen?.() || false);
   }
 }

@@ -1,64 +1,77 @@
 /* ───────────────────────────── Стили ───────────────────────────── */
 
 const CSS = `
-:root{--gpp-accent:#8b5cf6;--gpp-bg:rgba(24,18,43,var(--gpp-op,.92));--gpp-bg2:rgba(255,255,255,.06);--gpp-bg3:rgba(255,255,255,.11);
---gpp-line:rgba(255,255,255,.12);--gpp-text:#efeaff;--gpp-dim:#a99fc9;--gpp-r:12px;--gpp-font:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-.gpp,.gpp *{box-sizing:border-box;font-family:var(--gpp-font)}
-.gpp{color:var(--gpp-text);font-size:13px;line-height:1.35}
-.gpp button{font:inherit;color:inherit}
-.gpp-win{position:fixed;z-index:2147483000;background:var(--gpp-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-border:1px solid var(--gpp-line);border-radius:var(--gpp-r);box-shadow:0 18px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;min-width:220px;max-height:calc(100vh - 16px)}
+:root{--gpp-accent:#5bffb6;--gpp-book:rgb(48 26 107/var(--gpp-op,1));--gpp-head:rgb(83,34,160);--gpp-head-hi:rgb(104,61,209);--gpp-edge:rgb(23,5,87);
+--gpp-field:rgb(36,18,84);--gpp-text:#fff;--gpp-dim:rgba(232,222,255,.72);--gpp-line:rgba(160,130,240,.35);
+--gpp-panel-bg:rgba(94,24,51,.6);--gpp-panel-border:rgba(255,110,153,.3);--gpp-panel-shadow:rgba(94,24,51,.6);--gpp-tool-ring:rgb(103,22,52);
+--gpp-f-black:Black,"Arial Black",system-ui,sans-serif;--gpp-f-bold:Bold,system-ui,"Segoe UI",Arial,sans-serif;--gpp-f-reg:Regular,system-ui,"Segoe UI",Arial,sans-serif}
+.gpp,.gpp *{box-sizing:border-box}
+.gpp{color:var(--gpp-text);font:13px/1.35 var(--gpp-f-bold)}
+.gpp :where(button){font:inherit;color:inherit}
+.gpp-win{position:fixed;z-index:2147483000;background:var(--gpp-book);border:1.6px solid var(--gpp-edge);border-radius:14px;
+box-shadow:inset 0 0 0 2px var(--gpp-head),0 6px 0 rgba(0,0,0,.25),0 16px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;min-width:220px;max-height:calc(100vh - 16px)}
 .gpp-win.hidden{display:none}
-.gpp-win-head{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 14px;cursor:grab;user-select:none;border-bottom:1px solid var(--gpp-line)}
+.gpp-win-head{display:flex;align-items:center;gap:6px;padding:7px 8px 7px 14px;cursor:grab;user-select:none;background:var(--gpp-head);
+border-radius:12px 12px 0 0;box-shadow:inset 0 0 0 2px var(--gpp-head-hi)}
 .gpp-win-head:active{cursor:grabbing}
-.gpp-win-title{font-weight:700;font-size:13px;letter-spacing:.2px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gpp-win-title b{color:var(--gpp-accent)}
-.gpp-icon-btn{width:26px;height:26px;border-radius:8px;border:0;background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--gpp-dim);flex:none}
-.gpp-icon-btn:hover{background:var(--gpp-bg3);color:var(--gpp-text)}
-.gpp-icon-btn.on{background:var(--gpp-accent);color:#fff}
-.gpp-icon-btn svg{width:16px;height:16px}
+.gpp-win-title{font:15px/1.2 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.3px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gpp-win-title b{color:var(--gpp-accent);font-weight:400}
+.gpp-icon-btn{width:28px;height:28px;border-radius:8px;border:0;background:transparent;cursor:pointer;display:grid;place-items:center;color:#fff;flex:none;opacity:.85}
+.gpp-icon-btn:hover{background:rgba(255,255,255,.14);opacity:1}
+.gpp-icon-btn.on{background:var(--gpp-accent);color:var(--gpp-edge);opacity:1}
+.gpp-icon-btn svg{width:17px;height:17px}
 .gpp-win-body{padding:12px 14px;overflow:auto;flex:1}
-.gpp-win-body::-webkit-scrollbar{width:8px}.gpp-win-body::-webkit-scrollbar-thumb{background:var(--gpp-bg3);border-radius:8px}
+.gpp-win-body::-webkit-scrollbar,.gpp-scroll::-webkit-scrollbar{width:8px}
+.gpp-win-body::-webkit-scrollbar-thumb,.gpp-scroll::-webkit-scrollbar-thumb{background:var(--gpp-head-hi);border-radius:8px}
 .gpp-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize}
-.gpp-tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--gpp-line);overflow-x:auto}
-.gpp-tab{border:0;background:transparent;padding:8px 11px;border-radius:9px 9px 0 0;cursor:pointer;color:var(--gpp-dim);font-weight:600;white-space:nowrap}
-.gpp-tab:hover{color:var(--gpp-text)}.gpp-tab.on{color:var(--gpp-text);background:var(--gpp-bg2);box-shadow:inset 0 -2px 0 var(--gpp-accent)}
-.gpp-sec{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--gpp-dim);margin:14px 0 6px;font-weight:700}
+.gpp-tabs{display:flex;gap:6px;padding:10px 12px 0;overflow-x:auto}
+.gpp-tab{border:0;background:var(--gpp-field);padding:9px 14px;border-radius:9px 9px 0 0;cursor:pointer;color:var(--gpp-dim);font:13px/1 var(--gpp-f-black);text-transform:uppercase;white-space:nowrap}
+.gpp-tab:hover{color:#fff}.gpp-tab.on{color:var(--gpp-accent);background:var(--gpp-head);box-shadow:inset 0 2px 0 var(--gpp-head-hi)}
+.gpp-sec{font:12px/1 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.6px;color:var(--gpp-accent);margin:16px 0 6px}
 .gpp-sec:first-child{margin-top:0}
-.gpp-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:32px}
+.gpp-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:34px;border-bottom:1px solid rgba(255,255,255,.06)}
 .gpp-row .gpp-label{flex:1;min-width:0}
-.gpp-row .gpp-label small{display:block;color:var(--gpp-dim);font-size:11.5px;margin-top:1px}
-.gpp-switch{position:relative;width:38px;height:22px;border-radius:22px;background:var(--gpp-bg3);border:0;cursor:pointer;flex:none;transition:background .15s}
-.gpp-switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
-.gpp-switch.on{background:var(--gpp-accent)}.gpp-switch.on::after{transform:translateX(16px)}
+.gpp-row .gpp-label small{display:block;color:var(--gpp-dim);font:11.5px/1.3 var(--gpp-f-reg);margin-top:2px}
+.gpp-switch{position:relative;width:42px;height:24px;border-radius:24px;background:var(--gpp-field);box-shadow:inset 0 0 0 2px var(--gpp-head-hi);border:0;cursor:pointer;flex:none;transition:background .15s}
+.gpp-switch::after{content:"";position:absolute;top:4px;left:4px;width:16px;height:16px;border-radius:50%;background:#cbbcf2;transition:transform .15s,background .15s}
+.gpp-switch.on{background:var(--gpp-accent);box-shadow:none}.gpp-switch.on::after{transform:translateX(18px);background:var(--gpp-edge)}
 .gpp-slider{display:flex;align-items:center;gap:8px;width:170px;flex:none}
 .gpp-slider input{flex:1;accent-color:var(--gpp-accent);min-width:0}
-.gpp-slider output{width:42px;text-align:right;color:var(--gpp-dim);font-variant-numeric:tabular-nums}
-.gpp-select,.gpp-input{background:var(--gpp-bg2);border:1px solid var(--gpp-line);color:var(--gpp-text);border-radius:8px;padding:6px 8px;font:inherit;outline:none}
+.gpp-slider output{width:44px;text-align:right;color:var(--gpp-dim);font-variant-numeric:tabular-nums}
+.gpp-select,.gpp-input{background:var(--gpp-field);border:1.6px solid var(--gpp-head-hi);color:#fff;border-radius:8px;padding:6px 8px;font:13px var(--gpp-f-bold);outline:none}
 .gpp-select:focus,.gpp-input:focus{border-color:var(--gpp-accent)}
-.gpp-select option{background:#241b3d}
-.gpp-colorin{width:38px;height:26px;border:1px solid var(--gpp-line);border-radius:7px;padding:0;background:none;cursor:pointer}
-.gpp-btn{border:1px solid var(--gpp-line);background:var(--gpp-bg2);border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
-.gpp-btn:hover{background:var(--gpp-bg3)}
+.gpp-select option{background:var(--gpp-field)}
+.gpp-colorin{width:40px;height:28px;border:1.6px solid #fff;border-radius:7px;padding:0;background:none;cursor:pointer;box-shadow:0 0 0 2px var(--gpp-edge)}
+.gpp-btn{border:0;background:linear-gradient(#f6f0ff,#ddd0f5);color:var(--gpp-edge);border-radius:8px;padding:8px 14px;cursor:pointer;
+font:13px/1 var(--gpp-f-black);text-transform:uppercase;display:inline-flex;align-items:center;gap:6px;box-shadow:inset 0 0 0 2px #fff,0 4px 0 #9687bf;margin-bottom:4px}
+.gpp-btn:hover{filter:brightness(1.05)}.gpp-btn:active{transform:translateY(2px);box-shadow:inset 0 0 0 2px #fff,0 2px 0 #9687bf}
 .gpp-btn svg{width:16px;height:16px;flex:none}
-.gpp-btn.primary{background:var(--gpp-accent);border-color:transparent;color:#fff}
-.gpp-btn.danger:hover{background:#b4235a}
-.gpp-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.gpp-btn.primary{background:linear-gradient(#8dffd0,#3ee6a0);box-shadow:inset 0 0 0 2px #c8ffe8,0 4px 0 #1f9e6c}
+.gpp-btn.danger{background:linear-gradient(#ffb3c8,#ff7aa0);box-shadow:inset 0 0 0 2px #ffd6e2,0 4px 0 #b4235a}
+.gpp-btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
 .gpp-key{display:inline-flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
-.gpp-kbd{border:1px solid var(--gpp-line);background:var(--gpp-bg2);border-radius:7px;padding:3px 8px;font-size:12px;cursor:pointer;min-width:30px;text-align:center}
-.gpp-kbd:hover{border-color:var(--gpp-accent)}.gpp-kbd.rec{border-color:var(--gpp-accent);background:var(--gpp-accent);color:#fff}
+.gpp-kbd{border:1.6px solid var(--gpp-head-hi);background:var(--gpp-field);border-radius:7px;padding:3px 8px;font:12px var(--gpp-f-bold);cursor:pointer;min-width:30px;text-align:center}
+.gpp-kbd:hover{border-color:var(--gpp-accent)}.gpp-kbd.rec{border-color:var(--gpp-accent);background:var(--gpp-accent);color:var(--gpp-edge)}
 .gpp-kbd.empty{color:var(--gpp-dim)}
-.gpp-note{color:var(--gpp-dim);font-size:12px;margin:6px 0}
+.gpp-note{color:var(--gpp-dim);font:12px/1.4 var(--gpp-f-reg);margin:6px 0}
 .gpp-toasts{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:2147483600;display:flex;flex-direction:column;gap:6px;pointer-events:none}
-.gpp-toast{background:var(--gpp-bg);border:1px solid var(--gpp-line);border-radius:10px;padding:8px 14px;box-shadow:0 8px 24px rgba(0,0,0,.35);animation:gpp-in .18s ease-out}
+.gpp-toast{background:var(--gpp-head);border:1.6px solid var(--gpp-edge);box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 4px 0 rgba(0,0,0,.25);border-radius:10px;padding:9px 16px;animation:gpp-in .18s ease-out}
 @keyframes gpp-in{from{opacity:0;transform:translateY(-6px)}}
-.gpp-fab{position:fixed;right:14px;bottom:14px;z-index:2147483100;height:38px;padding:0 14px 0 10px;border-radius:19px;border:1px solid var(--gpp-line);
-background:var(--gpp-bg);backdrop-filter:blur(10px);color:var(--gpp-text);cursor:pointer;display:flex;align-items:center;gap:7px;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.gpp-fab:hover{border-color:var(--gpp-accent)}
-.gpp-fab i{width:20px;height:20px;border-radius:6px;background:var(--gpp-accent);display:grid;place-items:center;font-style:normal;font-size:12px;color:#fff}
-.gpp-modal{position:fixed;inset:0;z-index:2147483500;background:rgba(10,6,22,.55);display:grid;place-items:center}
-.gpp-modal .gpp-dialog{background:var(--gpp-bg);border:1px solid var(--gpp-line);border-radius:14px;padding:18px 20px;min-width:300px;max-width:420px;box-shadow:0 18px 50px rgba(0,0,0,.5)}
-.gpp-dialog h3{margin:0 0 8px;font-size:15px}
+.gpp-entry{position:absolute;z-index:20;height:28px;padding:0 10px 0 6px;border:0;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:5px;
+background:linear-gradient(#8dffd0,#3ee6a0);color:var(--gpp-edge);font:13px/1 var(--gpp-f-black);box-shadow:inset 0 0 0 2px #c8ffe8,0 3px 0 #1f9e6c}
+.gpp-entry:hover{filter:brightness(1.06)}
+.gpp-entry svg{width:16px;height:16px}
+.gpp-entry.floating{position:fixed;right:14px;bottom:14px;z-index:2147483100}
+.gpp-overlay{position:absolute;inset:0;z-index:200;background:rgba(23,5,87,.55);display:flex;align-items:center;justify-content:center}
+.gpp-overlay.fixed{position:fixed;z-index:2147483300}
+.gpp-dialog{position:relative;background:var(--gpp-book);border:1.6px solid var(--gpp-edge);border-radius:14px;box-shadow:inset 0 0 0 2px var(--gpp-head),0 6px 0 rgba(0,0,0,.25);
+display:flex;flex-direction:column;max-width:calc(100% - 40px);max-height:calc(100% - 40px)}
+.gpp-dialog-head{position:relative;background:var(--gpp-head);border-radius:12px 12px 0 0;box-shadow:inset 0 0 0 2px var(--gpp-head-hi);padding:12px 48px;text-align:center;
+font:20px/1.1 var(--gpp-f-black);text-transform:uppercase;letter-spacing:.4px}
+.gpp-dialog-head .gpp-icon-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+.gpp-dialog-body{overflow:auto;flex:1;padding:14px 18px}
+.gpp-confirm{padding:16px 22px;min-width:320px;text-align:center}
+.gpp-confirm .gpp-btns{justify-content:center}
 `;
 
 function injectCss(text, id) {
@@ -90,6 +103,17 @@ const ICON = {
   pin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6zM8 8.5V14"/></svg>',
   palette: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2a6 6 0 1 0 0 12c1 0 1.3-.8.9-1.5-.5-.8 0-1.8 1-1.8H12a2.5 2.5 0 0 0 2-2.5C14 4.6 11.3 2 8 2z"/><circle cx="5" cy="7" r=".9" fill="currentColor"/><circle cx="8" cy="5" r=".9" fill="currentColor"/><circle cx="11" cy="7" r=".9" fill="currentColor"/></svg>',
   gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>',
+  symV: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2.5v19" stroke-dasharray="3 3"/><path d="M9 8 4.5 12 9 16M15 8l4.5 4L15 16"/></svg>',
+  symH: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M2.5 12h19" stroke-dasharray="3 3"/><path d="M8 9l4-4.5L16 9M8 15l4 4.5 4-4.5"/></svg>',
+  symQ: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2.5v19M2.5 12h19" stroke-dasharray="3 3"/><circle cx="6.5" cy="6.5" r="1.8" fill="currentColor"/><circle cx="17.5" cy="6.5" r="1.8" fill="currentColor"/><circle cx="6.5" cy="17.5" r="1.8" fill="currentColor"/><circle cx="17.5" cy="17.5" r="1.8" fill="currentColor"/></svg>',
+  symR: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 12V3M12 12l7.8 4.5M12 12l-7.8 4.5"/></svg>',
+  symM: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke-width="1.5"/></svg>',
+  mirror: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2.5 2.5"/><path d="M9.5 6 3 18h6.5zM14.5 6 21 18h-6.5z"/></svg>',
+  mirrorY: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2.5 2.5"/><path d="M6 9.5 18 3v6.5zM6 14.5 18 21v-6.5z"/></svg>',
+  gray: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg>',
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>',
+  rays: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 12 12 3M12 12l8 4M12 12l-8 4"/></svg>',
 };
 
 /* ───────────────────────────── Окна ───────────────────────────── */
@@ -111,15 +135,50 @@ function toast(text, ms = 2200) {
   setTimeout(() => t.remove(), ms);
 }
 
+/* Окно в стиле диалогов Gartic. Встраивается внутрь .screen игры, поэтому масштабируется вместе с ней. */
+class GameModal extends Emitter {
+  constructor({ title, width = 640, height, className = '' }) {
+    super();
+    this.overlay = h('div', { class: 'gpp gpp-overlay' });
+    this.titleEl = h('span', { html: title });
+    this.head = h('div', { class: 'gpp-dialog-head' }, this.titleEl,
+      h('button', { class: 'gpp-icon-btn', title: 'Закрыть (Esc)', html: ICON.close, onclick: () => this.close() }));
+    this.body = h('div', { class: 'gpp-dialog-body gpp-scroll' });
+    this.dialog = h('div', { class: 'gpp-dialog ' + className, style: { width: width + 'px', height: height ? height + 'px' : null } }, this.head, this.body);
+    this.overlay.append(this.dialog);
+    this.overlay.addEventListener('pointerdown', e => { if (e.target === this.overlay) this.close(); });
+    for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'wheel', 'keydown', 'contextmenu']) this.dialog.addEventListener(t, e => e.stopPropagation());
+    this.onKey = e => { if (e.key === 'Escape' && this.isOpen && !Hotkeys.recording) { e.stopPropagation(); this.close(); } };
+  }
+  get isOpen() { return this.overlay.isConnected; }
+  open() {
+    const host = document.querySelector('.screen');
+    this.overlay.classList.toggle('fixed', !host);
+    (host || document.body).append(this.overlay);
+    window.addEventListener('keydown', this.onKey, true);
+    this.emit('open');
+  }
+  close() {
+    if (!this.isOpen) return;
+    this.overlay.remove();
+    window.removeEventListener('keydown', this.onKey, true);
+    this.emit('close');
+  }
+  toggle() { this.isOpen ? this.close() : this.open(); }
+  setTitle(t) { this.titleEl.innerHTML = t; }
+}
+
 function confirmDialog(title, text, okText = 'Да', cancelText = 'Отмена') {
   return new Promise(resolve => {
-    const done = v => { m.remove(); resolve(v); };
-    const m = h('div', { class: 'gpp gpp-modal', onpointerdown: e => { if (e.target === m) done(false); } },
-      h('div', { class: 'gpp-dialog' }, h('h3', {}, title), h('div', { class: 'gpp-note' }, text),
-        h('div', { class: 'gpp-btns', style: { justifyContent: 'flex-end' } },
-          h('button', { class: 'gpp-btn', onclick: () => done(false) }, cancelText),
-          h('button', { class: 'gpp-btn primary', onclick: () => done(true) }, okText))));
-    document.body.append(m);
+    const m = new GameModal({ title, width: 380, className: 'gpp-confirm-dlg' });
+    let result = false;
+    m.on('close', () => resolve(result));
+    m.body.classList.add('gpp-confirm');
+    m.body.append(h('div', { class: 'gpp-note', style: { fontSize: '14px', color: '#fff' } }, text),
+      h('div', { class: 'gpp-btns' },
+        h('button', { class: 'gpp-btn', onclick: () => m.close() }, cancelText),
+        h('button', { class: 'gpp-btn primary', onclick: () => { result = true; m.close(); } }, okText)));
+    m.open();
   });
 }
 

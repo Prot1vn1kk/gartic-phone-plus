@@ -138,7 +138,6 @@ const DEFAULTS = {
     readyConfirm: false,
     hideHeader: false,
     showCursor: true,
-    studioOpen: true,
   },
   reference: {
     engine: 'google',
@@ -152,8 +151,8 @@ const DEFAULTS = {
     speed: 1,
   },
   ui: {
-    accent: '#8b5cf6',
-    panelOpacity: 0.92,
+    accent: '#5bffb6',
+    panelOpacity: 1,
   },
 };
 

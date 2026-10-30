@@ -7,12 +7,17 @@ const PLAYER_CSS = `
 .gpp-player canvas{width:100%;flex:1;min-height:0;object-fit:contain;background:transparent;display:block}
 .gpp-player-ctrl{display:flex;align-items:center;gap:6px}
 .gpp-player-ctrl input[type=range]{flex:1;accent-color:var(--gpp-accent);min-width:0}
-.gpp-player-ctrl .gpp-select{padding:4px 6px}
-.gpp-player-time{color:var(--gpp-dim);font-variant-numeric:tabular-nums;font-size:12px;width:64px;text-align:right}
-.gpp-play-badge{position:absolute;right:8px;bottom:8px;z-index:3;width:34px;height:34px;border-radius:50%;border:0;background:var(--gpp-accent);color:#fff;
-cursor:pointer;display:grid;place-items:center;box-shadow:0 4px 12px rgba(0,0,0,.35);opacity:.85}
-.gpp-play-badge:hover{opacity:1;transform:scale(1.06)}
-.gpp-play-badge svg{width:16px;height:16px}
+.gpp-player-ctrl .gpp-select{padding:3px 4px;font-size:12px}
+.gpp-player-time{color:var(--gpp-dim);font:12px var(--gpp-f-bold);font-variant-numeric:tabular-nums;width:74px;text-align:right}
+.gpp-inline{position:absolute;inset:0;z-index:4;background:#fff;border-radius:inherit;overflow:hidden}
+.gpp-inline canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.gpp-inline .gpp-player-ctrl{position:absolute;left:8px;right:8px;bottom:8px;padding:5px 6px;border-radius:10px;background:var(--gpp-head);
+box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 3px 0 rgba(23,5,87,.5);opacity:0;transform:translateY(6px);transition:opacity .15s,transform .15s}
+.gpp-inline:hover .gpp-player-ctrl,.gpp-inline.paused .gpp-player-ctrl{opacity:1;transform:none}
+.gpp-play-badge{position:absolute;right:8px;bottom:8px;z-index:3;height:34px;padding:0 12px 0 9px;border-radius:9px;border:0;cursor:pointer;display:flex;align-items:center;gap:5px;
+background:linear-gradient(#8dffd0,#3ee6a0);color:rgb(23,5,87);font:13px/1 var(--gpp-f-black);text-transform:uppercase;box-shadow:inset 0 0 0 2px #c8ffe8,0 3px 0 #1f9e6c;opacity:.92}
+.gpp-play-badge:hover{opacity:1;filter:brightness(1.05)}
+.gpp-play-badge svg{width:14px;height:14px}
 .gpp-rec{color:#ff5a7a !important}
 `;
 
@@ -29,12 +34,13 @@ function partialStroke(v, k) {
   return v.slice(0, 3 + 2 * Math.max(1, Math.floor(k - STROKE_GAP)));
 }
 
+/* Плеер работает в двух видах: прямо в карточке рисунка альбома (host) или в отдельном окне. */
 class Player {
-  constructor(strokes, { title, W = 1516, H = 848 }) {
+  constructor(strokes, { title, W = 1516, H = 848, host = null }) {
     this.strokes = strokes.filter(Array.isArray);
     this.costs = this.strokes.map(strokeCost);
     this.total = this.costs.reduce((a, b) => a + b, 0) || 1;
-    this.W = W; this.H = H;
+    this.W = W; this.H = H; this.title = title;
     this.t = 0; this.done = 0; this.playing = false;
     this.layer = h('canvas', { width: W, height: H });
     this.lctx = this.layer.getContext('2d');
@@ -47,20 +53,51 @@ class Player {
     this.time = h('span', { class: 'gpp-player-time' });
     this.speed = UI.select(String(Settings.get('player', 'speed')), [['0.25', '×0.25'], ['0.5', '×0.5'], ['1', '×1'], ['2', '×2'], ['4', '×4'], ['8', '×8'], ['16', '×16']], v => Settings.set('player', 'speed', +v));
     this.recBtn = h('button', { class: 'gpp-icon-btn', title: 'Записать видео WebM', html: ICON.video, onclick: () => this.record() });
-
-    this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + (title || 'Таймлапс'), width: 560, height: 420, x: 120, y: 80, resizable: true, className: 'gpp-player' });
-    this.win.body.append(this.canvas, h('div', { class: 'gpp-player-ctrl' },
+    this.ctrl = h('div', { class: 'gpp-player-ctrl' },
       this.playBtn,
       h('button', { class: 'gpp-icon-btn', title: 'С начала', html: ICON.restart, onclick: () => { this.seekTo(0); this.play(); } }),
       this.seek, this.time, this.speed,
       h('button', { class: 'gpp-icon-btn', title: 'Сохранить PNG', html: ICON.download, onclick: () => this.savePng() }),
-      this.recBtn));
-    this.win.body.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); this.toggle(); } });
-    this.win.body.tabIndex = 0;
-    this.win.on('hide', () => { this.pause(); this.recorder?.stop(); this.win.el.remove(); Timelapse.current = null; });
-    this.win.show();
+      this.recBtn);
+
+    if (host) {
+      this.root = h('div', { class: 'gpp gpp-inline paused' }, this.canvas, this.ctrl);
+      this.ctrl.append(
+        h('button', { class: 'gpp-icon-btn', title: 'Открыть в большом окне', html: ICON.target, onclick: () => this.popOut() }),
+        h('button', { class: 'gpp-icon-btn', title: 'Закрыть плеер', html: ICON.close, onclick: () => this.close() }));
+      for (const t of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick']) this.root.addEventListener(t, e => e.stopPropagation());
+      this.root.addEventListener('click', e => { if (e.target === this.canvas) this.toggle(); });
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+      host.append(this.root);
+    } else {
+      this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + (title || 'Таймлапс'), width: 640, height: 450, x: 120, y: 80, resizable: true, className: 'gpp-player gpp' });
+      this.win.body.append(this.canvas, this.ctrl);
+      this.win.body.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); this.toggle(); } });
+      this.win.body.tabIndex = 0;
+      this.win.on('hide', () => this.close());
+      this.win.show();
+    }
     this.seekTo(Settings.get('player', 'autoplay') ? 0 : this.total);
     if (Settings.get('player', 'autoplay')) this.play();
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.pause();
+    if (this.recorder?.state === 'recording') this.recorder.stop();
+    this.root?.remove();
+    if (this.win) { this.win.el.remove(); }
+    if (Timelapse.current === this) Timelapse.current = null;
+  }
+
+  popOut() {
+    const t = this.t;
+    this.close();
+    Timelapse.current = new Player(this.strokes, { title: this.title, W: this.W, H: this.H });
+    Timelapse.current.pause();
+    Timelapse.current.seekTo(t);
+    Timelapse.current.play();
   }
 
   seekTo(t) {
@@ -102,6 +139,7 @@ class Player {
     if (this.t >= this.total) this.seekTo(0);
     this.playing = true;
     this.playBtn.innerHTML = ICON.pause;
+    this.root?.classList.remove('paused');
     let last = performance.now();
     const step = now => {
       if (!this.playing) return;
@@ -113,7 +151,7 @@ class Player {
     this.raf = requestAnimationFrame(step);
   }
 
-  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; }
+  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; this.root?.classList.add('paused'); }
   toggle() { this.playing ? this.pause() : this.play(); }
 
   savePng() {
@@ -167,9 +205,10 @@ const Timelapse = new (class {
     requestAnimationFrame(() => { this.pending = false; this.decorate(); });
   }
 
-  /* Возвращает { strokes, title, W, H } для элемента, по которому кликнули, или null */
+  /* Возвращает { strokes, title, W, H, host } для элемента, по которому кликнули, или null.
+     host — область рисунка в карточке альбома, куда встраивается плеер. */
   findTarget(el) {
-    if (!el || el.closest?.('.gpp-win, .gpp-stage')) return null;
+    if (!el || el.closest?.('.gpp-win, .gpp-stage, .gpp-inline')) return null;
     const item = el.closest?.('.timeline .item');
     if (item) {
       const items = [...document.querySelectorAll('.timeline .item')];
@@ -177,10 +216,11 @@ const Timelapse = new (class {
       const data = Net.album.items[idx];
       if (!data || !Array.isArray(data.data)) return null;
       const cv = item.querySelector('canvas');
-      return { strokes: data.data, title: `${data.user?.nick || ''} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848 };
+      const host = item.querySelector('.balloon .content') || cv?.parentElement || null;
+      return { strokes: data.data, title: `${data.user?.nick || ''} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848, host };
     }
     if (Net.state.screen === SCREEN.DESCRIPTION && el.tagName === 'CANVAS' && Array.isArray(Net.state.previous?.data)) {
-      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848 };
+      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848, host: null };
     }
     return null;
   }
@@ -192,10 +232,10 @@ const Timelapse = new (class {
     this.open(t);
   }
 
-  open({ strokes, title, W, H }) {
+  open({ strokes, title, W, H, host }) {
     if (!strokes?.length) return toast('В этом рисунке нет штрихов');
-    this.current?.win.hide();
-    this.current = new Player(strokes, { title, W, H });
+    this.current?.close();
+    this.current = new Player(strokes, { title, W, H, host });
   }
 
   decorate() {
@@ -203,10 +243,10 @@ const Timelapse = new (class {
     items.forEach((item, idx) => {
       const data = Net.album.items[idx];
       if (!data || !Array.isArray(data.data) || item.querySelector('.gpp-play-badge')) return;
-      const host = item.querySelector('.drawingmode') || item;
+      const host = item.querySelector('.balloon') || item.querySelector('.drawingmode') || item;
       if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
       host.append(h('button', {
-        class: 'gpp-play-badge', title: 'Таймлапс: как это рисовали', html: ICON.play,
+        class: 'gpp-play-badge gpp', title: 'Таймлапс: как это рисовали (двойной клик по рисунку)', html: ICON.play + '<span>Таймлапс</span>',
         onclick: e => { e.stopPropagation(); this.open(this.findTarget(item)); },
       }));
     });
