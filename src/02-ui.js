@@ -114,6 +114,10 @@ const ICON = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg>',
   target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>',
   rays: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 12 12 3M12 12l8 4M12 12l-8 4"/></svg>',
+  dot: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="11" r="2.3"/><circle cx="10.5" cy="6" r="4"/></svg>',
+  swap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h6.5a2.5 2.5 0 0 1 2.5 2.5v4.5M11 8.5l2 2 2-2M12 12.5H5.5A2.5 2.5 0 0 1 3 10V5.5M5 7.5l-2-2-2 2"/></svg>',
+  bw: '<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="8" height="8" rx="1.5" fill="currentColor"/><rect x="6.5" y="6.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  upload: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10"/></svg>',
 };
 
 /* ───────────────────────────── Окна ───────────────────────────── */

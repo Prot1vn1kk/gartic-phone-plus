@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gartic Phone Plus
 // @namespace    https://github.com/Prot1vn1kk
-// @version      1.2.0
+// @version      1.3.0
 // @description  Расширенное рисование, референсы, таймлапс-плеер и настройки для Gartic Phone. Один скрипт, без внешнего кода и аналитики.
 // @author       Prot1vn1kk
 // @license      MIT

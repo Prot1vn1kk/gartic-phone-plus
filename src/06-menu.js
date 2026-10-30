@@ -186,7 +186,7 @@ const Menu = new (class {
           Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.show(this.current); toast('Сброшено');
         } }, 'Сбросить всё')),
       UI.sec('О скрипте'),
-      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.2. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
+      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.3. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
       h('div', { class: 'gpp-note' }, 'Состояние: ' + (Net.connected ? 'подключено к игре' : 'ожидание подключения к комнате')),
     );
   }
@@ -209,7 +209,7 @@ onReady(() => {
   Menu.init();
   if (Net.state.screen === SCREEN.DRAW) Painter.scheduleAttach();
   if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse, Menu };
-  console.log('[GP+] Gartic Phone Plus 1.2 загружен');
+  console.log('[GP+] Gartic Phone Plus 1.3 загружен');
 });
 
 })();

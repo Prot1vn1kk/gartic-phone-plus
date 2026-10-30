@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gartic Phone Plus
 // @namespace    https://github.com/Prot1vn1kk
-// @version      1.2.0
+// @version      1.3.0
 // @description  Расширенное рисование, референсы, таймлапс-плеер и настройки для Gartic Phone. Один скрипт, без внешнего кода и аналитики.
 // @author       Prot1vn1kk
 // @license      MIT
@@ -531,6 +531,10 @@ const ICON = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg>',
   target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>',
   rays: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 12 12 3M12 12l8 4M12 12l-8 4"/></svg>',
+  dot: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="11" r="2.3"/><circle cx="10.5" cy="6" r="4"/></svg>',
+  swap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h6.5a2.5 2.5 0 0 1 2.5 2.5v4.5M11 8.5l2 2 2-2M12 12.5H5.5A2.5 2.5 0 0 1 3 10V5.5M5 7.5l-2-2-2 2"/></svg>',
+  bw: '<svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="8" height="8" rx="1.5" fill="currentColor"/><rect x="6.5" y="6.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  upload: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M3 13h10"/></svg>',
 };
 
 /* ───────────────────────────── Окна ───────────────────────────── */
@@ -1101,21 +1105,22 @@ function parsePaletteText(text) {
 /* ───────── Выбор цвета (квадрат насыщенности/яркости + полоса оттенка) ───────── */
 
 class ColorPicker extends Emitter {
-  constructor({ width = 220, height = 150 } = {}) {
+  constructor({ width = 220, height = 150, vertical = false } = {}) {
     super();
     this.hsv = [0, 0, 0];
-    this.el = h('div', { class: 'gpp-cp' });
+    this.vertical = vertical;
+    this.el = h('div', { class: 'gpp-cp' + (vertical ? ' vert' : '') });
     this.sv = h('canvas', { class: 'gpp-cp-sv', width, height });
-    this.hue = h('canvas', { class: 'gpp-cp-hue', width, height: 14 });
+    this.hue = vertical ? h('canvas', { class: 'gpp-cp-hue', width: 12, height }) : h('canvas', { class: 'gpp-cp-hue', width, height: 14 });
     this.svMark = h('div', { class: 'gpp-cp-mark' });
     this.hueMark = h('div', { class: 'gpp-cp-hmark' });
     this.el.append(h('div', { class: 'gpp-cp-svwrap' }, this.sv, this.svMark), h('div', { class: 'gpp-cp-huewrap' }, this.hue, this.hueMark));
     const hc = this.hue.getContext('2d');
-    const g = hc.createLinearGradient(0, 0, width, 0);
+    const g = vertical ? hc.createLinearGradient(0, 0, 0, height) : hc.createLinearGradient(0, 0, width, 0);
     for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, `hsl(${i * 60},100%,50%)`);
-    hc.fillStyle = g; hc.fillRect(0, 0, width, 14);
+    hc.fillStyle = g; hc.fillRect(0, 0, this.hue.width, this.hue.height);
     this.drag(this.sv, (x, y) => { this.hsv[1] = x; this.hsv[2] = 1 - y; this.update(true); });
-    this.drag(this.hue, x => { this.hsv[0] = Math.min(x, 0.9999); this.update(true); });
+    this.drag(this.hue, (x, y) => { this.hsv[0] = Math.min(vertical ? y : x, 0.9999); this.update(true); });
   }
   drag(el, fn) {
     el.addEventListener('pointerdown', e => {
@@ -1143,7 +1148,8 @@ class ColorPicker extends Emitter {
     this.svMark.style.left = this.hsv[1] * 100 + '%';
     this.svMark.style.top = (1 - this.hsv[2]) * 100 + '%';
     this.svMark.style.background = this.hex;
-    this.hueMark.style.left = this.hsv[0] * 100 + '%';
+    if (this.vertical) this.hueMark.style.top = this.hsv[0] * 100 + '%';
+    else this.hueMark.style.left = this.hsv[0] * 100 + '%';
     if (fire) this.emit('input', this.hex);
   }
 }
@@ -1508,6 +1514,8 @@ const Painter = new (class extends Emitter {
     this.syncGameUi();
     this.ui.refresh();
   }
+
+  resetColors() { this.color = '#000000'; this.color2 = '#ffffff'; this.ui.refresh(); this.render(); }
 
   swapColors() { [this.color, this.color2] = [this.color2, this.color]; this.ui.refresh(); this.render(); }
 
@@ -1885,6 +1893,7 @@ const Painter = new (class extends Emitter {
     R('moreOpacity', 'Насыщеннее', ['Period'], { ...G2, repeat: true });
     GAME_THICKNESS.forEach((t, i) => R('size' + (i + 1), `Толщина ${t}`, ['Digit' + (i + 1)], G2));
     R('swap', 'Поменять основной и доп. цвет', ['KeyX'], G2);
+    R('resetColors', 'Чёрный и белый', ['KeyD'], G2);
     R('picker', 'Палитра под курсором', ['Tab'], G2);
     R('pan', 'Перемещать холст', ['Space'], { ...G3, hold: true });
     R('rotate', 'Поворачивать холст', ['Ctrl+Space'], { ...G3, hold: true });
@@ -1920,6 +1929,7 @@ const Painter = new (class extends Emitter {
         case 'lessOpacity': this.setOpacity(this.opacity - 1); break;
         case 'moreOpacity': this.setOpacity(this.opacity + 1); break;
         case 'swap': this.swapColors(); break;
+        case 'resetColors': this.resetColors(); break;
         case 'picker': this.openPicker(p.x, p.y); break;
         case 'zoomIn': this.zoomAt(this.view.zoom * step, p.x, p.y); break;
         case 'zoomOut': this.zoomAt(this.view.zoom / step, p.x, p.y); break;
@@ -1951,11 +1961,14 @@ const Painter = new (class extends Emitter {
     if (!this.picker) {
       this.picker = new Win({ id: 'popup-picker', title: 'Цвет', width: 250 });
       this.picker.el.classList.add('gpp-popup-picker');
-      this.popupCp = new ColorPicker({ width: 220, height: 160 });
+      this.popupCp = new ColorPicker({ width: 196, height: 170, vertical: true });
       this.popupCp.on('input', hex => this.setColor(hex, false));
       this.popupCp.on('commit', hex => this.pushRecent(hex));
       this.picker.body.append(this.popupCp.el);
-    }
+      // Как всплывающая палитра в редакторах: повторная клавиша, Esc или клик мимо — закрыть
+      window.addEventListener('keydown', e => { if (e.key === 'Escape' && this.picker.visible) { e.stopPropagation(); this.picker.hide(); } }, true);
+      window.addEventListener('pointerdown', e => { if (this.picker.visible && !this.picker.el.contains(e.target)) this.picker.hide(); }, true);
+    } else if (this.picker.visible) return this.picker.hide();
     this.popupCp.set(this.color);
     this.picker.pos = { x: x - 125, y: y - 110 };
     this.picker.show();
@@ -1969,12 +1982,66 @@ const Painter = new (class extends Emitter {
    Всё вставляется внутрь .screen, поэтому масштабируется вместе с игрой.            */
 
 const GAMEUI_CSS = `
-.gpp-col{width:129px;padding:8px;border-radius:9px;background:var(--gpp-panel-bg);border:1.6px solid var(--gpp-panel-border);
-box-shadow:0 0 0 3px var(--gpp-panel-shadow);display:flex;flex-direction:column;gap:7px;color:#fff;font:11px/1.2 var(--gpp-f-bold);user-select:none}
+.gpp-col{width:129px;padding:4px 8px 8px;border-radius:9px;background:var(--gpp-panel-bg);border:1.6px solid var(--gpp-panel-border);
+box-shadow:0 0 0 3px var(--gpp-panel-shadow);display:flex;flex-direction:column;color:#fff;font:11px/1.2 var(--gpp-f-bold);user-select:none}
 .gpp-col *{box-sizing:border-box}
+.gpp-left{width:152px}
 .gpp-right{margin-top:16px}
 .gpp-panels-hidden .gpp-col,.gpp-panels-hidden .gpp-hdr{display:none}
 .gpp-panels-hidden .colors .content.gpp-native-hidden{display:flex !important}
+.gpp-pn{padding:6px 0 2px;border-top:1px solid var(--gpp-panel-border)}
+.gpp-pn:first-child{border-top:0}
+.gpp-pn-h{display:flex;align-items:center;gap:2px;height:20px;margin-bottom:6px}
+.gpp-pn-h .t{flex:1;min-width:0;display:flex;align-items:center;gap:5px;font:11px var(--gpp-f-bold);color:rgba(255,255,255,.8);cursor:pointer;white-space:nowrap}
+.gpp-pn-h .t:hover{color:#fff}
+.gpp-pn-h .t:empty{flex:none;padding:0 4px 0 0;height:20px}
+.gpp-pn-h .t::before{content:"";border:4px solid transparent;border-top-color:currentColor;border-bottom:0;transition:transform .15s}
+.gpp-pn.collapsed .gpp-pn-h{margin-bottom:2px}
+.gpp-pn.collapsed .gpp-pn-h .t::before{transform:rotate(-90deg)}
+.gpp-pn.collapsed .gpp-pn-b{display:none}
+.gpp-pn-b{display:flex;flex-direction:column;gap:7px}
+.gpp-ib{width:20px;height:20px;flex:none;border:0;border-radius:5px;background:transparent;color:#fff;opacity:.75;cursor:pointer;display:grid;place-items:center;padding:0}
+.gpp-ib:hover{opacity:1;background:rgba(255,255,255,.16)}
+.gpp-ib svg{width:13px;height:13px}
+.gpp-pn-h select{flex:1;min-width:0;background:rgba(0,0,0,.3);border:0;border-radius:5px;color:#fff;font:11px var(--gpp-f-bold);padding:2px 2px;outline:none;cursor:pointer}
+.gpp-pn-h select option{background:var(--gpp-field)}
+.gpp-fgbg{display:flex;align-items:center;gap:9px}
+.gpp-sq{position:relative;width:44px;height:40px;flex:none}
+.gpp-sq .fg,.gpp-sq .bg{position:absolute;width:28px;height:28px;border-radius:5px;box-shadow:0 0 0 1.5px #fff,0 0 0 3px rgba(0,0,0,.3);cursor:pointer}
+.gpp-sq .fg{left:1px;top:1px;z-index:1}
+.gpp-sq .bg{right:1px;bottom:1px}
+.gpp-hexbox{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.gpp-hexbox input{width:100%;background:rgba(0,0,0,.3);border:1.5px solid transparent;border-radius:6px;color:#fff;font:12px var(--gpp-f-bold);padding:5px 6px;outline:none;text-transform:uppercase}
+.gpp-hexbox input:focus{border-color:#fff}
+.gpp-hexbox .row{display:flex;gap:2px}
+.gpp-cp.vert{flex-direction:row;gap:8px}
+.gpp-cp.vert .gpp-cp-svwrap{flex:1;min-width:0}
+.gpp-col .gpp-cp.vert{gap:6px}
+.gpp-col .gpp-cp canvas{border-radius:5px;box-shadow:0 0 0 1.5px rgba(255,255,255,.65)}
+.gpp-cp.vert .gpp-cp-huewrap{width:12px;flex:none}
+.gpp-cp.vert .gpp-cp-huewrap canvas{position:absolute;inset:0;width:100%;height:100%;border-radius:6px}
+.gpp-cp.vert .gpp-cp-hmark{left:-3px;top:0;width:18px;height:6px;transform:translateY(-50%)}
+.gpp-spectrum{display:grid;grid-template-columns:repeat(13,1fr);border-radius:5px;overflow:hidden;box-shadow:0 0 0 1.5px rgba(255,255,255,.65)}
+.gpp-spectrum i{display:block;aspect-ratio:1;cursor:pointer}
+.gpp-spectrum i:hover{outline:2px solid #fff;outline-offset:-1px;position:relative;z-index:1}
+.gpp-spectrum i.sel{outline:2px solid var(--gpp-accent);outline-offset:-1px;position:relative;z-index:2}
+.gpp-swgrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;max-height:124px;overflow:hidden auto;padding:2px;margin:-2px}
+.gpp-swgrid::-webkit-scrollbar{width:4px;height:0}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
+.gpp-col .gpp-sw{width:auto;height:auto;border:0;outline:0;transform:none;aspect-ratio:1;border-radius:4px;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25),0 0 0 1px rgba(255,255,255,.45)}
+.gpp-col .gpp-sw:hover{transform:none;box-shadow:0 0 0 2px #fff}
+.gpp-col .gpp-sw.sel{outline:0;box-shadow:0 0 0 2px var(--gpp-accent)}
+.gpp-swgrid .gpp-empty{grid-column:1/-1;font:10.5px/1.3 var(--gpp-f-reg);opacity:.75}
+.gpp-sl{display:grid;grid-template-columns:14px 1fr 32px;align-items:center;gap:6px}
+.gpp-sl svg{width:14px;height:14px;opacity:.85}
+.gpp-sl input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;margin:0;background:transparent;cursor:pointer}
+.gpp-sl input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,#fff var(--p,50%),rgba(255,255,255,.25) var(--p,50%))}
+.gpp-sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;margin-top:-4px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px var(--gpp-tool-ring)}
+.gpp-sl input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(255,255,255,.25)}
+.gpp-sl input[type=range]::-moz-range-progress{height:4px;border-radius:2px;background:#fff}
+.gpp-sl input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff;box-shadow:0 0 0 2px var(--gpp-tool-ring)}
+.gpp-sl .num{width:32px;background:rgba(0,0,0,.3);border:1.5px solid transparent;border-radius:5px;color:#fff;font:11px var(--gpp-f-bold);text-align:center;padding:3px 0;outline:none;-moz-appearance:textfield}
+.gpp-sl .num::-webkit-inner-spin-button{-webkit-appearance:none}
+.gpp-sl .num:focus{border-color:#fff}
 .gpp-tgrid{display:grid;grid-template-columns:repeat(3,30px);justify-content:space-between;gap:8px 0}
 .gpp-tbtn{position:relative;width:30px;height:30px;border-radius:7px;border:1.6px solid #fff;box-shadow:0 0 0 2px var(--gpp-tool-ring);background:transparent;
 color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;font:12px/1 var(--gpp-f-black)}
@@ -1983,43 +2050,6 @@ color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;font:12px/1 
 .gpp-tbtn svg{width:19px;height:19px}
 .gpp-tbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
 background:var(--gpp-edge);color:#fff;font:11px/1 var(--gpp-f-bold);padding:6px 8px;border-radius:6px;pointer-events:none;z-index:50}
-.gpp-left .gpp-tbtn[data-tip]:hover::after{right:auto;left:calc(100% + 8px)}
-.gpp-sep{height:1px;background:var(--gpp-panel-border);margin:1px 0}
-.gpp-colhead{display:flex;align-items:center;gap:6px}
-.gpp-pair{position:relative;width:40px;height:36px;flex:none;cursor:pointer}
-.gpp-pair span{position:absolute;width:26px;height:26px;border-radius:6px;border:1.6px solid rgb(67,17,31);box-shadow:0 0 0 2px #fff}
-.gpp-pair .c1{left:2px;top:2px;z-index:1}.gpp-pair .c2{right:2px;bottom:2px}
-.gpp-hex{width:100%;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:11px var(--gpp-f-bold);padding:4px 5px;outline:none;text-transform:uppercase}
-.gpp-hex:focus{border-color:#fff}
-.gpp-col .gpp-cp{gap:6px}
-.gpp-col .gpp-cp canvas{border-radius:6px;box-shadow:0 0 0 1.6px rgba(255,255,255,.7)}
-.gpp-col .gpp-cp-huewrap canvas{height:10px;border-radius:5px}
-.gpp-col .gpp-cp-hmark{height:16px}
-.gpp-rangebox{display:flex;align-items:center;gap:5px}
-.gpp-rangebox input{flex:1;min-width:0;accent-color:#fff;height:14px}
-.gpp-rangebox b{width:26px;text-align:right;font:11px var(--gpp-f-black)}
-.gpp-palbar{display:flex;align-items:center;gap:3px}
-.gpp-palbar select{flex:1;min-width:0;background:rgba(0,0,0,.28);border:1.6px solid var(--gpp-panel-border);border-radius:6px;color:#fff;font:10.5px var(--gpp-f-bold);padding:3px 2px;outline:none}
-.gpp-palbar select option{background:var(--gpp-field)}
-.gpp-palbar button{width:20px;height:20px;border:0;border-radius:5px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
-.gpp-palbar button:hover{background:rgba(255,255,255,.3)}
-.gpp-palbar svg{width:13px;height:13px}
-.gpp-left{width:154px}
-.gpp-spectrum{display:grid;grid-template-columns:repeat(13,1fr);border-radius:6px;overflow:hidden;box-shadow:0 0 0 1.6px rgba(255,255,255,.75)}
-.gpp-spectrum i{display:block;aspect-ratio:1;cursor:pointer}
-.gpp-spectrum i:hover{outline:2px solid #fff;outline-offset:-1px;position:relative;z-index:1}
-.gpp-spectrum i.sel{outline:2px solid var(--gpp-accent);outline-offset:-1px;position:relative;z-index:2}
-.gpp-big{position:relative;height:30px;border-radius:7px;display:flex;overflow:hidden;box-shadow:0 0 0 1.6px #fff,0 0 0 3.4px rgb(67,17,31);margin:2px}
-.gpp-big .p{flex:1}.gpp-big .s{width:32%;cursor:pointer;box-shadow:inset 2px 0 0 rgba(255,255,255,.8)}
-.gpp-big input{position:absolute;left:5px;top:50%;transform:translateY(-50%);width:70px;background:rgba(0,0,0,.38);border:0;border-radius:5px;color:#fff;font:11px var(--gpp-f-bold);padding:3px 5px;text-transform:uppercase;outline:none}
-.gpp-big input:focus{background:rgba(0,0,0,.6)}
-.gpp-rangebox span{width:36px;font:10.5px var(--gpp-f-bold);opacity:.85}
-.gpp-swgrid{display:grid;grid-template-columns:repeat(6,20px);justify-content:space-between;gap:4px 0;max-height:142px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
-.gpp-swgrid::-webkit-scrollbar{width:4px}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
-.gpp-col .gpp-sw{width:20px;height:20px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
-.gpp-col .gpp-sw:hover{transform:scale(1.12)}
-.gpp-col .gpp-sw.sel{box-shadow:0 0 0 2.5px var(--gpp-accent)}
-.gpp-recent{grid-template-columns:repeat(6,20px);max-height:none}
 .gpp-hdr{position:absolute;left:56px;top:10px;display:flex;gap:4px;z-index:6}
 .gpp-hbtn{width:32px;height:30px;border:0;background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;border-radius:7px}
 .gpp-hbtn:hover{background:rgba(255,255,255,.14)}
@@ -2116,43 +2146,69 @@ class GameUI {
     return el;
   }
 
+  /* Секция панели в стиле графических редакторов: заголовок (клик — свернуть), иконки справа, содержимое */
+  section(key, title, tools, ...content) {
+    const el = h('div', { class: 'gpp-pn' + (Store.get('pn.' + key, false) ? ' collapsed' : '') });
+    const t = h('div', { class: 't', title: 'Свернуть / развернуть' }, title || null);
+    t.addEventListener('click', () => Store.set('pn.' + key, el.classList.toggle('collapsed')));
+    el.append(h('div', { class: 'gpp-pn-h' }, t, ...tools), h('div', { class: 'gpp-pn-b' }, ...content));
+    return el;
+  }
+
+  ibtn(icon, title, fn) {
+    return h('button', { class: 'gpp-ib', title, html: icon, onclick: e => { e.stopPropagation(); fn(); } });
+  }
+
+  /* Ползунок: иконка, тонкая дорожка с заливкой и редактируемое число */
+  slider(icon, title, min, get, set) {
+    const inp = h('input', { type: 'range', min, step: 1, title });
+    const num = h('input', { class: 'num', type: 'number', min, title });
+    const paint = () => inp.style.setProperty('--p', ((inp.value - inp.min) / Math.max(1, inp.max - inp.min)) * 100 + '%');
+    inp.addEventListener('input', () => { set(+inp.value); paint(); });
+    num.addEventListener('change', () => set(clamp(+num.value || min, min, +inp.max)));
+    num.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') num.blur(); });
+    const row = h('div', { class: 'gpp-sl', title }, h('span', { html: icon }), inp, num);
+    row.upd = max => {
+      inp.max = num.max = max;
+      inp.value = get();
+      if (document.activeElement !== num) num.value = get();
+      paint();
+    };
+    return row;
+  }
+
   buildLeft() {
     const p = this.p;
+    this.fg = h('div', { class: 'fg', title: 'Основной цвет' });
+    this.bg = h('div', { class: 'bg', title: 'Дополнительный цвет — рисуется правой кнопкой. Клик — поменять местами (X)', onclick: () => p.swapColors() });
     this.hex = h('input', { maxlength: 7, spellcheck: 'false', title: 'HEX-код основного цвета' });
     this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
-    this.hex.addEventListener('click', e => e.stopPropagation());
-    this.bigP = h('div', { class: 'p', title: 'Основной цвет (ЛКМ)' });
-    this.bigS = h('div', { class: 's', title: 'Дополнительный цвет (ПКМ рисует им). Клик — поменять местами (X)', onclick: () => p.swapColors() });
-    this.cp = new ColorPicker({ width: 136, height: 92 });
+    this.hex.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') this.hex.blur(); });
+    this.cp = new ColorPicker({ width: 118, height: 86, vertical: true });
     this.cp.on('input', hex => p.setColor(hex, false));
     this.cp.on('commit', hex => p.pushRecent(hex));
-    const range = (title, min, get, set) => {
-      const inp = h('input', { type: 'range', min, step: 1, title });
-      const val = h('b');
-      inp.addEventListener('input', () => set(+inp.value));
-      const box = h('div', { class: 'gpp-rangebox', title }, h('span', {}, title.split(' ')[0]), inp, val);
-      box.upd = max => { inp.max = max; inp.value = get(); val.textContent = get(); };
-      return box;
-    };
-    this.size = range('Толщина кисти ([ и ], Ctrl+тянуть)', 1, () => p.thickness, v => p.setThickness(v));
-    this.opac = range('Насыщенность кисти (, и ., Shift+тянуть)', 1, () => p.opacity, v => p.setOpacity(v));
-    this.palSel = h('select', { title: 'Палитра' });
+    this.palSel = h('select', { title: 'Набор цветов' });
     this.palSel.addEventListener('change', () => { this.palName = this.palSel.value; Store.set('palette.current', this.palName); this.refresh(); });
     const file = h('input', { type: 'file', accept: '.aco,.gpl,.txt,.hex', style: { display: 'none' } });
     file.addEventListener('change', () => this.importPalette(file.files[0]).finally(() => (file.value = '')));
     this.spectrum = this.buildSpectrum();
     this.palGrid = h('div', { class: 'gpp-swgrid' });
-    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent', title: 'Последние цвета' });
+    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent' });
+    this.size = this.slider(ICON.dot, 'Толщина кисти: [ и ], или Ctrl + тянуть мышью', 1, () => p.thickness, v => p.setThickness(v));
+    this.opac = this.slider(ICON.gray, 'Насыщенность кисти: , и ., или Shift + тянуть мышью', 1, () => p.opacity, v => p.setOpacity(v));
     return this.stop(h('div', { class: 'gpp-col gpp-left gpp' },
-      h('div', { class: 'gpp-palbar' }, this.palSel,
-        h('button', { title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
-        h('button', { title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
-        file),
-      this.spectrum, this.palGrid,
-      this.cp.el,
-      h('div', { class: 'gpp-big' }, this.bigP, this.bigS, this.hex),
-      this.size, this.opac,
-      this.recentGrid));
+      this.section('color', 'Цвет', [
+        this.ibtn(ICON.swap, 'Поменять основной и дополнительный (X)', () => p.swapColors()),
+        this.ibtn(ICON.bw, 'Чёрный и белый (D)', () => p.resetColors()),
+      ],
+      h('div', { class: 'gpp-fgbg' }, h('div', { class: 'gpp-sq' }, this.fg, this.bg), h('div', { class: 'gpp-hexbox' }, this.hex)),
+      this.cp.el),
+      this.section('palette', '', [this.palSel,
+        this.ibtn(ICON.plus, 'Добавить текущий цвет в «Мои цвета»', () => this.addToMine()),
+        this.ibtn(ICON.upload, 'Импорт палитры (.aco, .gpl, .txt)', () => file.click()), file],
+      this.spectrum, this.palGrid),
+      this.section('brush', 'Кисть', [], this.size, this.opac),
+      this.section('recent', 'Недавние', [], this.recentGrid)));
   }
 
   /* Спектр как в gpmod: столбцы — оттенки, строки — светлота; последний столбец серый, нижняя строка — тона кожи */
@@ -2201,7 +2257,9 @@ class GameUI {
       viewBtn('grid', ICON.grid, 'Сетка (G)'),
       this.tbtn(ICON.target, 'Сбросить масштаб и поворот (A)', () => { p.resetView(); p.updateHud(); }),
       this.tbtn(ICON.trash, 'Очистить холст (Shift+Delete)', () => p.clearAll()));
-    return this.stop(h('div', { class: 'gpp-col gpp-right gpp' }, this.symGrid, h('div', { class: 'gpp-sep' }), this.viewGrid));
+    return this.stop(h('div', { class: 'gpp-col gpp-right gpp' },
+      this.section('sym', 'Симметрия', [], this.symGrid),
+      this.section('view', 'Вид', [], this.viewGrid)));
   }
 
   changeRays(d) {
@@ -2259,10 +2317,9 @@ class GameUI {
   refresh() {
     const p = this.p;
     if (!this.mounted) return;
-    this.bigP.style.background = p.color;
-    this.bigS.style.background = p.color2;
-    if (document.activeElement !== this.hex) this.hex.value = p.color;
-    this.hex.style.color = Color.hexToHsv(p.color)[2] > 0.6 && Color.hexToHsv(p.color)[1] < 0.5 ? '#000' : '#fff';
+    this.fg.style.background = p.color;
+    this.bg.style.background = p.color2;
+    if (document.activeElement !== this.hex) this.hex.value = p.color.toUpperCase();
     if (!this.cp.dragging) this.cp.set(p.color);
     this.size.upd(Settings.get('painter', 'maxThickness'));
     this.opac.upd(10);
@@ -2276,10 +2333,10 @@ class GameUI {
     else {
       const removable = !!this.palettes[this.palName];
       this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
-      if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
+      if (!all[this.palName].length) this.palGrid.append(h('div', { class: 'gpp-empty' }, 'Пусто. Кнопка «+» добавит текущий цвет.'));
     }
-    this.recentGrid.replaceChildren(...p.recent.slice(0, 12).map(c => this.swatch(c)));
-    this.recentGrid.style.display = p.recent.length ? '' : 'none';
+    this.recentGrid.replaceChildren(...p.recent.slice(0, 6).map(c => this.swatch(c)));
+    if (!p.recent.length) this.recentGrid.append(h('div', { class: 'gpp-empty' }, 'Здесь появятся цвета, которыми вы рисовали.'));
     if (this.right) {
       this.symGrid.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', p.sym.on && b.dataset.mode === p.sym.mode));
       const rays = p.sym.mode === SYM.RADIAL || p.sym.mode === SYM.MANDALA;
@@ -3559,7 +3616,7 @@ const Menu = new (class {
           Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.show(this.current); toast('Сброшено');
         } }, 'Сбросить всё')),
       UI.sec('О скрипте'),
-      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.2. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
+      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.3. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
       h('div', { class: 'gpp-note' }, 'Состояние: ' + (Net.connected ? 'подключено к игре' : 'ожидание подключения к комнате')),
     );
   }
@@ -3582,7 +3639,7 @@ onReady(() => {
   Menu.init();
   if (Net.state.screen === SCREEN.DRAW) Painter.scheduleAttach();
   if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse, Menu };
-  console.log('[GP+] Gartic Phone Plus 1.2 загружен');
+  console.log('[GP+] Gartic Phone Plus 1.3 загружен');
 });
 
 })();
