@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gartic Phone Plus
 // @namespace    https://github.com/Prot1vn1kk
-// @version      1.1.0
+// @version      1.2.0
 // @description  Расширенное рисование, референсы, таймлапс-плеер и настройки для Gartic Phone. Один скрипт, без внешнего кода и аналитики.
 // @author       Prot1vn1kk
 // @license      MIT
@@ -18,6 +18,8 @@
 // @grant        GM_setValue
 // @connect      commons.wikimedia.org
 // @connect      api.openverse.org
+// @connect      upload.wikimedia.org
+// @connect      thumb.wikimedia.org
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=garticphone.com
 // ==/UserScript==
 
@@ -168,11 +170,13 @@ const DEFAULTS = {
     radialCount: 8,
     mandalaCount: 4,
     readyConfirm: false,
+    clearConfirm: true,
     hideHeader: false,
     showCursor: true,
   },
   reference: {
-    engine: 'google',
+    dockWidth: 360,
+    engine: 'commons',
     googleSafe: 'active',
     frameOpacity: 1,
     stickyEdges: true,
@@ -180,11 +184,13 @@ const DEFAULTS = {
   player: {
     autoplay: true,
     openOnDblClick: true,
-    speed: 1,
+    speed: 10,
   },
   ui: {
     accent: '#5bffb6',
     panelOpacity: 1,
+    fixedSize: false,
+    fixedScale: 1,
   },
 };
 
@@ -835,6 +841,56 @@ const Hotkeys = new (class extends Emitter {
     return box;
   }
 })();
+
+/* ───────────────────────────── Раскладка экрана игры ─────────────────────────────
+   Игра центрирует .screen и масштабирует его от размера окна. Когда открыта боковая панель
+   референсов или включён фиксированный размер, масштаб и сдвиг считает скрипт.             */
+
+const Layout = new (class extends Emitter {
+  constructor() { super(); this.dock = 0; }
+
+  init() {
+    injectCss('html.gpp-layout .screen{transform:scale(var(--gpp-scr-scale,1)) !important}', 'gpp-layout-css');
+    window.addEventListener('resize', () => this.applySoon());
+    new MutationObserver(() => { if (this.active) this.applySoon(); }).observe(document.body, { childList: true, subtree: true });
+    Settings.on('change', mod => { if (mod === 'ui') this.applySoon(); });
+    this.applySoon();
+  }
+
+  get active() { return this.dock > 0 || Settings.get('ui', 'fixedSize'); }
+
+  setDock(px) { this.dock = Math.max(0, px | 0); this.apply(); }
+
+  applySoon() {
+    if (this.pending) return;
+    this.pending = true;
+    requestAnimationFrame(() => { this.pending = false; this.apply(); });
+  }
+
+  apply() {
+    const scr = document.querySelector('.screen');
+    const root = document.documentElement;
+    if (!scr) return;
+    const par = scr.parentElement;
+    if (!this.active) {
+      if (root.classList.contains('gpp-layout')) { root.classList.remove('gpp-layout'); par.style.marginLeft = ''; this.emit('change'); }
+      return;
+    }
+    root.classList.add('gpp-layout');
+    const ml = this.dock ? this.dock + 'px' : '';
+    if (par.style.marginLeft !== ml) par.style.marginLeft = ml;
+    const pr = par.getBoundingClientRect();
+    const fit = Math.min((pr.width - 12) / scr.offsetWidth, (pr.height - 12) / scr.offsetHeight);
+    const scale = Settings.get('ui', 'fixedSize') ? Math.min(Settings.get('ui', 'fixedScale'), this.dock ? fit : Infinity) : fit;
+    const val = String(Math.max(0.3, Math.round(scale * 1000) / 1000));
+    if (root.style.getPropertyValue('--gpp-scr-scale') !== val) { root.style.setProperty('--gpp-scr-scale', val); this.emit('change'); }
+    else if (this.lastDock !== this.dock) this.emit('change');
+    this.lastDock = this.dock;
+  }
+
+  /* Прямоугольник экрана игры в координатах окна */
+  screenRect() { return document.querySelector('.screen')?.getBoundingClientRect() || null; }
+})();
 /* ───────────────────────────── Рисование ─────────────────────────────
    Поверх холста игры кладётся собственный слой: своя отрисовка, история, вид (зум/поворот/зеркало)
    и отправка штрихов на сервер в формате игры (событие 7). Холст игры на время хода скрыт.        */
@@ -1204,6 +1260,7 @@ const Painter = new (class extends Emitter {
     for (const c of this.gameCanvases) c.style.visibility = 'hidden';
 
     this.history = []; this.redoStack = []; this.current = null;
+    this.timing = new Map();
     this.nextId = 1;
     for (const s of Net.state.draw || []) if (Array.isArray(s) && s[1] >= this.nextId) this.nextId = s[1] + 1;
     this.view = { ...this.view, zoom: 1, rot: 0, panX: 0, panY: 0 };
@@ -1230,6 +1287,9 @@ const Painter = new (class extends Emitter {
     this.resize();
     this.syncGameUi();
     this.ui.mount();
+    // после анимации появления экрана и при изменении раскладки пересчитать размер холста
+    this.resizeTimer = setTimeout(() => this.resize(), 800);
+    this.offLayout = Layout.on('change', () => setTimeout(() => this.resize(), 50));
     this.emit('attach');
   }
 
@@ -1238,6 +1298,8 @@ const Painter = new (class extends Emitter {
     if (!this.active) return;
     this.active = false;
     this.cancelStroke();
+    if (this.history.length) Timelapse.rememberOwn(this.history.flatMap(g => g.strokes), this.timing);
+    clearTimeout(this.resizeTimer); this.offLayout?.();
     this.ro?.disconnect(); this.guard?.disconnect();
     this.unbind?.forEach(f => f());
     this.unbind = [];
@@ -1264,11 +1326,14 @@ const Painter = new (class extends Emitter {
 
   resize() {
     if (!this.stage) return;
-    // offsetWidth не зависит от CSS-трансформаций (у экрана игры есть анимация появления со scale)
+    // Координаты считаются в пикселях макета (offsetWidth не зависит от transform экрана игры),
+    // а сам холст — в реальных пикселях экрана с учётом масштаба игры: так картинка не размывается.
     this.dpr = window.devicePixelRatio || 1;
     this.cw = this.stage.offsetWidth; this.ch = this.stage.offsetHeight;
-    this.viewCanvas.width = Math.max(1, round(this.cw * this.dpr));
-    this.viewCanvas.height = Math.max(1, round(this.ch * this.dpr));
+    const r = this.stage.getBoundingClientRect();
+    this.pxk = this.dpr * (r.width && this.cw ? r.width / this.cw : 1);
+    this.viewCanvas.width = Math.max(1, round(this.cw * this.pxk));
+    this.viewCanvas.height = Math.max(1, round(this.ch * this.pxk));
     this.render();
   }
 
@@ -1327,11 +1392,11 @@ const Painter = new (class extends Emitter {
 
   draw() {
     if (!this.active) return;
-    const c = this.vctx, dpr = this.dpr;
+    const c = this.vctx, k = this.pxk;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.viewCanvas.width, this.viewCanvas.height);
     const m = this.matrix();
-    c.setTransform(new DOMMatrix([dpr, 0, 0, dpr, 0, 0]).multiply(m));
+    c.setTransform(new DOMMatrix([k, 0, 0, k, 0, 0]).multiply(m));
     c.imageSmoothingEnabled = this.view.zoom < 2;
     c.fillStyle = '#fff';
     c.fillRect(0, 0, this.W, this.H);
@@ -1553,7 +1618,7 @@ const Painter = new (class extends Emitter {
     const ip = [round(p[0]), round(p[1])];
     if (tool === TOOL.FILL) return this.fillAt(ip, color);
     const style = [color, this.thickness, this.opacity];
-    this.current = { tool, style, raw: [ip], smooth: [ip], start: ip, end: ip, strokes: [], ids: [] };
+    this.current = { tool, style, raw: [ip], smooth: [ip], start: ip, end: ip, strokes: [], ids: [], t0: Date.now() };
     const transforms = this.sym.on ? symmetryTransforms(this.sym.mode, this.symCount(), this.W / 2, this.H / 2) : [];
     this.current.transforms = [{ f: q => q, rigid: true }, ...transforms];
     if (SHAPE_TOOLS.has(tool) && (this.sym.mode === SYM.RADIAL || this.sym.mode === SYM.MANDALA))
@@ -1628,18 +1693,20 @@ const Painter = new (class extends Emitter {
       if (cur.start[0] === cur.end[0] && cur.start[1] === cur.end[1]) { this.render(); return; }
       cur.strokes.forEach(v => Net.tool(1, v));
     }
-    this.commit({ ids: cur.ids, strokes: cur.strokes });
+    this.commit({ ids: cur.ids, strokes: cur.strokes, t0: cur.t0 });
   }
 
   cancelStroke() {
     if (!this.current) return;
     const cur = this.current;
     this.current = null;
-    if (cur.tool === TOOL.PEN || cur.tool === TOOL.ERASER) this.commit({ ids: cur.ids, strokes: cur.strokes });
+    if (cur.tool === TOOL.PEN || cur.tool === TOOL.ERASER) this.commit({ ids: cur.ids, strokes: cur.strokes, t0: cur.t0 });
     this.render();
   }
 
   commit(group) {
+    const t1 = Date.now();
+    for (const id of group.ids) if (!this.timing.has(id)) this.timing.set(id, [group.t0 || t1, t1]);
     this.history.push(group);
     this.redoStack = [];
     for (const v of group.strokes) renderStroke(this.docCtx, v);
@@ -1675,7 +1742,7 @@ const Painter = new (class extends Emitter {
 
   async clearAll() {
     if (!this.history.length) return;
-    if (!(await confirmDialog('Очистить холст?', 'Все ваши штрихи этого хода будут отменены. Вернуть их будет нельзя.', 'Очистить'))) return;
+    if (Settings.get('painter', 'clearConfirm') && !(await confirmDialog('Очистить холст?', 'Все ваши штрихи этого хода будут отменены. Вернуть их будет нельзя.', 'Очистить'))) return;
     for (const g of [...this.history].reverse()) g.ids.forEach(id => Net.tool(2, id));
     this.history = []; this.redoStack = [];
     this.rebuildDoc();
@@ -1937,12 +2004,22 @@ background:var(--gpp-edge);color:#fff;font:11px/1 var(--gpp-f-bold);padding:6px 
 .gpp-palbar button{width:20px;height:20px;border:0;border-radius:5px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
 .gpp-palbar button:hover{background:rgba(255,255,255,.3)}
 .gpp-palbar svg{width:13px;height:13px}
-.gpp-swgrid{display:grid;grid-template-columns:repeat(5,18px);justify-content:space-between;gap:5px 0;max-height:118px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
+.gpp-left{width:154px}
+.gpp-spectrum{display:grid;grid-template-columns:repeat(13,1fr);border-radius:6px;overflow:hidden;box-shadow:0 0 0 1.6px rgba(255,255,255,.75)}
+.gpp-spectrum i{display:block;aspect-ratio:1;cursor:pointer}
+.gpp-spectrum i:hover{outline:2px solid #fff;outline-offset:-1px;position:relative;z-index:1}
+.gpp-spectrum i.sel{outline:2px solid var(--gpp-accent);outline-offset:-1px;position:relative;z-index:2}
+.gpp-big{position:relative;height:30px;border-radius:7px;display:flex;overflow:hidden;box-shadow:0 0 0 1.6px #fff,0 0 0 3.4px rgb(67,17,31);margin:2px}
+.gpp-big .p{flex:1}.gpp-big .s{width:32%;cursor:pointer;box-shadow:inset 2px 0 0 rgba(255,255,255,.8)}
+.gpp-big input{position:absolute;left:5px;top:50%;transform:translateY(-50%);width:70px;background:rgba(0,0,0,.38);border:0;border-radius:5px;color:#fff;font:11px var(--gpp-f-bold);padding:3px 5px;text-transform:uppercase;outline:none}
+.gpp-big input:focus{background:rgba(0,0,0,.6)}
+.gpp-rangebox span{width:36px;font:10.5px var(--gpp-f-bold);opacity:.85}
+.gpp-swgrid{display:grid;grid-template-columns:repeat(6,20px);justify-content:space-between;gap:4px 0;max-height:142px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
 .gpp-swgrid::-webkit-scrollbar{width:4px}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
-.gpp-col .gpp-sw{width:18px;height:18px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
+.gpp-col .gpp-sw{width:20px;height:20px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
 .gpp-col .gpp-sw:hover{transform:scale(1.12)}
 .gpp-col .gpp-sw.sel{box-shadow:0 0 0 2.5px var(--gpp-accent)}
-.gpp-recent{grid-template-columns:repeat(5,18px);max-height:none}
+.gpp-recent{grid-template-columns:repeat(6,20px);max-height:none}
 .gpp-hdr{position:absolute;left:56px;top:10px;display:flex;gap:4px;z-index:6}
 .gpp-hbtn{width:32px;height:30px;border:0;background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;border-radius:7px}
 .gpp-hbtn:hover{background:rgba(255,255,255,.14)}
@@ -1958,7 +2035,7 @@ class GameUI {
   constructor(p) {
     this.p = p;
     this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
-    this.palName = Store.get('palette.current', 'Gartic');
+    this.palName = Store.get('palette.current', 'Спектр');
     this.gamePalette = [];
     injectCss(GAMEUI_CSS, 'gpp-gameui-css');
   }
@@ -2041,35 +2118,62 @@ class GameUI {
 
   buildLeft() {
     const p = this.p;
-    this.c1 = h('span', { class: 'c1' }); this.c2 = h('span', { class: 'c2' });
-    this.hex = h('input', { class: 'gpp-hex', maxlength: 7, spellcheck: 'false', title: 'HEX-код цвета' });
+    this.hex = h('input', { maxlength: 7, spellcheck: 'false', title: 'HEX-код основного цвета' });
     this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
-    this.cp = new ColorPicker({ width: 111, height: 78 });
+    this.hex.addEventListener('click', e => e.stopPropagation());
+    this.bigP = h('div', { class: 'p', title: 'Основной цвет (ЛКМ)' });
+    this.bigS = h('div', { class: 's', title: 'Дополнительный цвет (ПКМ рисует им). Клик — поменять местами (X)', onclick: () => p.swapColors() });
+    this.cp = new ColorPicker({ width: 136, height: 92 });
     this.cp.on('input', hex => p.setColor(hex, false));
     this.cp.on('commit', hex => p.pushRecent(hex));
-    this.size = h('input', { type: 'range', min: 1, step: 1, title: 'Толщина кисти' });
-    this.size.addEventListener('input', () => p.setThickness(+this.size.value));
-    this.sizeVal = h('b');
+    const range = (title, min, get, set) => {
+      const inp = h('input', { type: 'range', min, step: 1, title });
+      const val = h('b');
+      inp.addEventListener('input', () => set(+inp.value));
+      const box = h('div', { class: 'gpp-rangebox', title }, h('span', {}, title.split(' ')[0]), inp, val);
+      box.upd = max => { inp.max = max; inp.value = get(); val.textContent = get(); };
+      return box;
+    };
+    this.size = range('Толщина кисти ([ и ], Ctrl+тянуть)', 1, () => p.thickness, v => p.setThickness(v));
+    this.opac = range('Насыщенность кисти (, и ., Shift+тянуть)', 1, () => p.opacity, v => p.setOpacity(v));
     this.palSel = h('select', { title: 'Палитра' });
     this.palSel.addEventListener('change', () => { this.palName = this.palSel.value; Store.set('palette.current', this.palName); this.refresh(); });
     const file = h('input', { type: 'file', accept: '.aco,.gpl,.txt,.hex', style: { display: 'none' } });
     file.addEventListener('change', () => this.importPalette(file.files[0]).finally(() => (file.value = '')));
+    this.spectrum = this.buildSpectrum();
     this.palGrid = h('div', { class: 'gpp-swgrid' });
-    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent' });
+    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent', title: 'Последние цвета' });
     return this.stop(h('div', { class: 'gpp-col gpp-left gpp' },
-      h('div', { class: 'gpp-colhead' },
-        h('div', { class: 'gpp-pair', title: 'Основной / дополнительный цвет (ПКМ рисует дополнительным). Клик — поменять (X)', onclick: () => p.swapColors() }, this.c1, this.c2),
-        this.hex),
-      this.cp.el,
-      h('div', { class: 'gpp-rangebox', title: 'Толщина кисти ([ и ])' }, this.size, this.sizeVal),
-      h('div', { class: 'gpp-sep' }),
       h('div', { class: 'gpp-palbar' }, this.palSel,
         h('button', { title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
         h('button', { title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
         file),
-      this.palGrid,
-      h('div', { class: 'gpp-sep' }),
+      this.spectrum, this.palGrid,
+      this.cp.el,
+      h('div', { class: 'gpp-big' }, this.bigP, this.bigS, this.hex),
+      this.size, this.opac,
       this.recentGrid));
+  }
+
+  /* Спектр как в gpmod: столбцы — оттенки, строки — светлота; последний столбец серый, нижняя строка — тона кожи */
+  buildSpectrum() {
+    const hsl = (hh, s, l) => {
+      const a = s * Math.min(l, 1 - l), f = n => { const k = (n + hh / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+      return Color.rgbToHex(f(0) * 255, f(8) * 255, f(4) * 255);
+    };
+    const colors = [];
+    for (let r = 0; r < 10; r++) {
+      const l = 0.9 - r * 0.084;
+      for (let c = 0; c < 12; c++) colors.push(hsl(c * 30, r < 1 ? 0.75 : 0.88, l));
+      colors.push(hsl(0, 0, r === 0 ? 1 : r === 9 ? 0 : 1 - r / 9));
+    }
+    colors.push('#ffe8d6', '#ffd5b8', '#f5c19e', '#e8a87c', '#d4915f', '#bf7a4a', '#a0613a', '#82492b', '#66361f', '#4a2616', '#f2d7c9', '#c99d84', '#2e1a10');
+    this.spectrumColors = colors;
+    const el = h('div', { class: 'gpp-spectrum', title: 'ЛКМ — основной цвет, ПКМ — дополнительный' });
+    colors.forEach(c => el.append(h('i', { style: { background: c }, dataset: { c } })));
+    el.addEventListener('click', e => { const c = e.target.dataset?.c; if (c) this.p.setColor(c); });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); const c = e.target.dataset?.c; if (c) { this.p.color2 = c; this.refresh(); } });
+    return el;
   }
 
   buildRight() {
@@ -2109,7 +2213,7 @@ class GameUI {
   }
 
   allPalettes() {
-    return { Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
+    return { 'Спектр': this.spectrumColors || [], Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
   }
 
   harmony() {
@@ -2155,20 +2259,26 @@ class GameUI {
   refresh() {
     const p = this.p;
     if (!this.mounted) return;
-    this.c1.style.background = p.color;
-    this.c2.style.background = p.color2;
+    this.bigP.style.background = p.color;
+    this.bigS.style.background = p.color2;
     if (document.activeElement !== this.hex) this.hex.value = p.color;
+    this.hex.style.color = Color.hexToHsv(p.color)[2] > 0.6 && Color.hexToHsv(p.color)[1] < 0.5 ? '#000' : '#fff';
     if (!this.cp.dragging) this.cp.set(p.color);
-    this.size.max = Settings.get('painter', 'maxThickness');
-    this.size.value = p.thickness;
-    this.sizeVal.textContent = p.thickness;
+    this.size.upd(Settings.get('painter', 'maxThickness'));
+    this.opac.upd(10);
     const all = this.allPalettes();
-    if (!all[this.palName]) this.palName = 'Gartic';
+    if (!all[this.palName]) this.palName = 'Спектр';
     this.palSel.replaceChildren(...Object.keys(all).map(n => h('option', { value: n, selected: n === this.palName }, n)));
-    const removable = !!this.palettes[this.palName];
-    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
-    if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
-    this.recentGrid.replaceChildren(...p.recent.slice(0, 10).map(c => this.swatch(c)));
+    const isSpectrum = this.palName === 'Спектр';
+    this.spectrum.style.display = isSpectrum ? '' : 'none';
+    this.palGrid.style.display = isSpectrum ? 'none' : '';
+    if (isSpectrum) this.spectrum.querySelectorAll('i').forEach(i => i.classList.toggle('sel', i.dataset.c === p.color));
+    else {
+      const removable = !!this.palettes[this.palName];
+      this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
+      if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
+    }
+    this.recentGrid.replaceChildren(...p.recent.slice(0, 12).map(c => this.swatch(c)));
     this.recentGrid.style.display = p.recent.length ? '' : 'none';
     if (this.right) {
       this.symGrid.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', p.sym.on && b.dataset.mode === p.sym.mode));
@@ -2181,30 +2291,58 @@ class GameUI {
   }
 }
 /* ───────────────────────────── Референсы ─────────────────────────────
-   Поиск идёт через открытые API (Wikimedia Commons, Openverse). Google и Pinterest открываются
-   в новой вкладке: картинку оттуда можно перетащить, вставить (Ctrl+V) или добавить по ссылке.   */
+   Боковая панель слева от игры: поиск (Wikimedia Commons, Openverse), история, просмотр картинки
+   с перемещением и масштабом. Картинку можно открепить в плавающее окно поверх игры.
+   Google и Pinterest открываются во вкладке: картинку оттуда перетаскивают или вставляют Ctrl+V. */
 
 const REF_CSS = `
-.gpp-ref .gpp-dialog-body{display:flex;flex-direction:column;gap:10px}
-.gpp-ref-bar{display:flex;gap:6px}
-.gpp-ref-bar .gpp-input{flex:1;min-width:0}
-.gpp-ref-grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;align-content:start;min-height:120px}
-.gpp-ref-grid img{width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--gpp-field);display:block;box-shadow:0 0 0 1.6px var(--gpp-head-hi)}
-.gpp-ref-grid img:hover{outline:2px solid var(--gpp-accent)}
-.gpp-ref-drop{border:2px dashed var(--gpp-head-hi);border-radius:10px;padding:10px;text-align:center;color:var(--gpp-dim);font:12px var(--gpp-f-reg)}
-.gpp-ref.dragover .gpp-ref-drop{border-color:var(--gpp-accent);color:#fff}
-.gpp-frame .gpp-win-body{padding:0;overflow:hidden;position:relative;cursor:grab;background:repeating-conic-gradient(#ffffff10 0 25%,transparent 0 50%) 0 0/16px 16px}
-.gpp-frame img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
-.gpp-frame .gpp-win-head{padding:5px 6px 5px 10px}
-.gpp-frame .gpp-op{width:70px;accent-color:var(--gpp-accent)}
+.gpp-dock{position:fixed;z-index:2147482000;display:flex;flex-direction:column;background:var(--gpp-book);border:1.6px solid var(--gpp-edge);border-radius:12px;
+box-shadow:inset 0 0 0 2px var(--gpp-head),0 6px 0 rgba(0,0,0,.25);overflow:hidden}
+.gpp-dock.hidden{display:none}
+.gpp-dock-head{display:flex;align-items:center;gap:4px;padding:6px;background:var(--gpp-head);box-shadow:inset 0 -2px 0 var(--gpp-head-hi)}
+.gpp-dock-search{flex:1;min-width:0;display:flex;align-items:center;gap:4px;background:var(--gpp-field);border:1.6px solid var(--gpp-head-hi);border-radius:8px;padding:0 4px 0 8px}
+.gpp-dock-search:focus-within{border-color:var(--gpp-accent)}
+.gpp-dock-search input{flex:1;min-width:0;background:none;border:0;outline:none;color:#fff;font:13px var(--gpp-f-bold);padding:6px 0}
+.gpp-dock-search svg{width:15px;height:15px;opacity:.7;flex:none}
+.gpp-dock-head .gpp-icon-btn{width:28px;height:28px}
+.gpp-dock-head select{max-width:92px;background:var(--gpp-field);border:1.6px solid var(--gpp-head-hi);border-radius:8px;color:#fff;font:12px var(--gpp-f-bold);padding:5px 2px;outline:none}
+.gpp-dock-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.gpp-dock-status{padding:5px 10px;color:var(--gpp-dim);font:11.5px/1.3 var(--gpp-f-reg)}
+.gpp-dock-grid{flex:1;min-height:0;overflow:auto;padding:0 6px 6px;column-gap:6px}
+.gpp-dock-grid img{display:block;width:100%;margin:0 0 6px;border-radius:6px;cursor:zoom-in;background:var(--gpp-field);break-inside:avoid;min-height:40px}
+.gpp-dock-grid img:hover{outline:2px solid var(--gpp-accent);outline-offset:-2px}
+.gpp-dock-empty{padding:18px 14px;color:var(--gpp-dim);font:12.5px/1.5 var(--gpp-f-reg);text-align:center}
+.gpp-dock-empty b{color:#fff;font-family:var(--gpp-f-bold)}
+.gpp-dock-resize{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:ew-resize;z-index:5}
+.gpp-dock-resize:hover{background:linear-gradient(90deg,transparent 2px,var(--gpp-accent) 2px,var(--gpp-accent) 5px,transparent 5px)}
+.gpp-dock.dragover{box-shadow:inset 0 0 0 3px var(--gpp-accent)}
+.gpp-history{position:absolute;left:6px;right:6px;top:2px;max-height:70%;overflow:auto;z-index:10;background:var(--gpp-field);border:1.6px solid var(--gpp-head-hi);border-radius:8px;
+display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:4px;padding:6px;box-shadow:0 8px 20px rgba(0,0,0,.4)}
+.gpp-history img{width:100%;height:60px;object-fit:cover;border-radius:5px;cursor:pointer}
+.gpp-history img:hover{outline:2px solid var(--gpp-accent)}
+.gpp-viewer{position:absolute;inset:0;overflow:hidden;background:repeating-conic-gradient(#ffffff0d 0 25%,transparent 0 50%) 0 0/16px 16px;cursor:grab;touch-action:none}
+.gpp-viewer.panning{cursor:grabbing}
+.gpp-viewer img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
+.gpp-viewer.gray img{filter:grayscale(1)}
+.gpp-viewer-bar{position:absolute;left:6px;right:6px;top:6px;display:flex;flex-wrap:wrap;gap:3px;padding:3px;border-radius:9px;background:rgba(23,5,87,.78);
+opacity:0;transition:opacity .15s;z-index:2}
+.gpp-viewer:hover .gpp-viewer-bar,.gpp-viewer-bar:hover{opacity:1}
+.gpp-viewer-bar .gpp-icon-btn{width:26px;height:26px}
+.gpp-viewer-bar .gpp-zoomval{color:#fff;font:11px var(--gpp-f-bold);align-self:center;min-width:38px;text-align:center}
+.gpp-viewer-hint{position:absolute;left:8px;bottom:6px;right:8px;color:#fff;font:11px/1.3 var(--gpp-f-reg);text-shadow:0 1px 2px #000;opacity:0;transition:opacity .2s;pointer-events:none}
+.gpp-viewer:hover .gpp-viewer-hint{opacity:.85}
+.gpp-frame .gpp-win-body{padding:0;overflow:hidden;position:relative}
+.gpp-frame .gpp-viewer{border-radius:0 0 12px 12px}
+.gpp-frame .gpp-win-head{padding:4px 4px 4px 10px}
+.gpp-frame .gpp-win-head .gpp-icon-btn{width:24px;height:24px}
+.gpp-frame .gpp-op{width:64px;accent-color:var(--gpp-accent)}
 .gpp-frame.pinned{pointer-events:none}
-.gpp-frame.pinned .gpp-win-head{pointer-events:auto}
-.gpp-frame.pinned .gpp-win-body{cursor:default}
+.gpp-frame.pinned .gpp-win-head{pointer-events:auto;opacity:.85}
 `;
 
 const REF_ENGINES = {
   commons: {
-    name: 'Wikimedia Commons',
+    name: 'Wikimedia',
     async search(q, page) {
       const offset = (page - 1) * 40;
       const url = 'https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({
@@ -2241,71 +2379,144 @@ function gmJson(url) {
   }));
 }
 
-class RefFrame {
-  constructor(src, { title = 'Референс', state } = {}) {
-    this.src = src;
-    this.id = 'frame-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    this.op = h('input', { type: 'range', class: 'gpp-op', min: 0.1, max: 1, step: 0.05, value: state?.op ?? Settings.get('reference', 'frameOpacity'), title: 'Прозрачность' });
-    this.pinBtn = h('button', { class: 'gpp-icon-btn', title: 'Закрепить: клики проходят сквозь картинку', html: ICON.pin, onclick: () => this.setPinned(!this.pinned) });
-    this.win = new Win({ id: this.id, title, width: state?.w || 300, height: state?.h || 240, x: state?.x ?? 120 + Math.random() * 80, y: state?.y ?? 120 + Math.random() * 60, resizable: true, className: 'gpp-frame', buttons: [this.op, this.pinBtn] });
+function gmBlob(url) {
+  return new Promise((resolve, reject) => GM_xmlhttpRequest({
+    url, method: 'GET', responseType: 'blob', anonymous: true, timeout: 20000,
+    onload: r => (r.status === 200 && r.response ? resolve(r.response) : reject(new Error('HTTP ' + r.status))),
+    onerror: () => reject(new Error('сеть недоступна')),
+    ontimeout: () => reject(new Error('таймаут')),
+  }));
+}
+
+async function saveImage(src, name = 'reference') {
+  try {
+    const blob = /^(blob:|data:)/.test(src) ? await (await fetch(src)).blob() : await gmBlob(src);
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    downloadBlob(blob, `${name.replace(/[^\wа-яё -]+/gi, '').trim() || 'reference'}.${ext}`);
+  } catch (e) {
+    toast('Не удалось скачать картинку: ' + e.message + '. Открываю во вкладке.');
+    window.open(src, '_blank', 'noopener');
+  }
+}
+
+/* Просмотр картинки: ЛКМ — перемещение, колесо — масштаб к курсору, двойной клик / средняя кнопка — вписать.
+   Используется и в боковой панели, и в плавающих окнах. */
+class RefViewer extends Emitter {
+  constructor() {
+    super();
     this.img = h('img', { referrerpolicy: 'no-referrer', draggable: 'false' });
-    this.win.body.append(this.img);
-    this.z = 1; this.x = 0; this.y = 0;
-    this.op.addEventListener('input', () => { this.win.el.style.opacity = this.op.value; Reference.saveFrames(); });
-    this.win.el.style.opacity = this.op.value;
-    this.img.addEventListener('load', () => this.fit());
+    this.zoomVal = h('span', { class: 'gpp-zoomval' });
+    this.bar = h('div', { class: 'gpp-viewer-bar' });
+    this.hint = h('div', { class: 'gpp-viewer-hint' });
+    this.el = h('div', { class: 'gpp-viewer' }, this.img, this.bar, this.hint);
+    this.z = 1; this.x = 0; this.y = 0; this.flip = false;
+    this.img.addEventListener('load', () => { this.loaded = true; this.fit(); this.emit('load'); });
     this.img.addEventListener('error', () => this.fallback());
+    new ResizeObserver(() => this.loaded && !this.touched && this.fit()).observe(this.el);
+    this.bindInput();
+  }
+
+  tool(icon, title, fn) {
+    const b = h('button', { class: 'gpp-icon-btn', title, html: icon, onclick: e => { e.stopPropagation(); fn(b); } });
+    this.bar.append(b);
+    return b;
+  }
+
+  load(src, title) {
+    this.src = src; this.title = title || 'Референс'; this.loaded = false; this.triedGm = false; this.touched = false;
     this.img.src = src;
-    this.win.on('hide', () => Reference.removeFrame(this));
-    new ResizeObserver(() => this.loaded && this.apply()).observe(this.win.body);
-    this.bindPanZoom();
-    this.win.show();
-    if (state?.pinned) this.setPinned(true);
-    this.win.el.addEventListener('pointerup', () => Reference.saveFrames());
   }
 
   fallback() {
     if (this.triedGm || !/^https?:/.test(this.src)) return toast('Не удалось загрузить картинку');
     this.triedGm = true;
-    GM_xmlhttpRequest({
-      url: this.src, method: 'GET', responseType: 'blob', anonymous: true, timeout: 20000,
-      onload: r => { if (r.status === 200 && r.response) this.img.src = URL.createObjectURL(r.response); else toast('Не удалось загрузить картинку'); },
-      onerror: () => toast('Не удалось загрузить картинку'),
-    });
+    gmBlob(this.src).then(b => { this.img.src = URL.createObjectURL(b); }).catch(() => toast('Не удалось загрузить картинку'));
   }
 
   fit() {
-    this.loaded = true;
-    const bw = this.win.body.clientWidth, bh = this.win.body.clientHeight;
+    if (!this.loaded) return;
+    const bw = this.el.clientWidth, bh = this.el.clientHeight;
+    if (!bw || !bh) return;
     this.z = Math.min(bw / this.img.naturalWidth, bh / this.img.naturalHeight);
     this.x = (bw - this.img.naturalWidth * this.z) / 2;
     this.y = (bh - this.img.naturalHeight * this.z) / 2;
+    this.touched = false;
     this.apply();
   }
 
-  apply() { this.img.style.transform = `translate(${this.x}px,${this.y}px) scale(${this.z})`; }
+  zoomTo(nz, mx, my) {
+    nz = clamp(nz, 0.02, 40);
+    this.x = mx - ((mx - this.x) * nz) / this.z;
+    this.y = my - ((my - this.y) * nz) / this.z;
+    this.z = nz;
+    this.touched = true;
+    this.apply();
+  }
 
-  bindPanZoom() {
-    const b = this.win.body;
-    b.addEventListener('wheel', e => {
-      e.preventDefault();
-      const r = b.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-      const nz = clamp(this.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.02, 40);
-      this.x = mx - ((mx - this.x) * nz) / this.z;
-      this.y = my - ((my - this.y) * nz) / this.z;
-      this.z = nz;
-      this.apply();
+  zoomBy(k) { this.zoomTo(this.z * k, this.el.clientWidth / 2, this.el.clientHeight / 2); }
+
+  apply() {
+    this.img.style.transform = `translate(${this.x}px,${this.y}px) scale(${this.z})` + (this.flip ? ` translate(${this.img.naturalWidth}px,0) scaleX(-1)` : '');
+    this.zoomVal.textContent = round(this.z * 100) + '%';
+  }
+
+  toggleFlip() { this.flip = !this.flip; this.apply(); return this.flip; }
+  toggleGray() { return this.el.classList.toggle('gray'); }
+
+  bindInput() {
+    const el = this.el;
+    el.addEventListener('wheel', e => {
+      e.preventDefault(); e.stopPropagation();
+      const r = el.getBoundingClientRect();
+      this.zoomTo(this.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
-    b.addEventListener('dblclick', () => this.fit());
-    b.addEventListener('pointerdown', e => {
+    el.addEventListener('dblclick', e => { e.stopPropagation(); this.fit(); });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); this.emit('back'); });
+    el.addEventListener('pointerdown', e => {
+      if (e.target.closest('.gpp-viewer-bar')) return;
+      e.stopPropagation();
+      if (e.button === 1) { e.preventDefault(); return this.fit(); }
       if (e.button !== 0) return;
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); return saveImage(this.src, this.title); }
       e.preventDefault();
-      b.setPointerCapture(e.pointerId);
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('panning');
       const sx = e.clientX - this.x, sy = e.clientY - this.y;
-      const mv = ev => { this.x = ev.clientX - sx; this.y = ev.clientY - sy; this.apply(); };
-      const up = () => { b.removeEventListener('pointermove', mv); b.removeEventListener('pointerup', up); };
-      b.addEventListener('pointermove', mv); b.addEventListener('pointerup', up);
+      const mv = ev => { this.x = ev.clientX - sx; this.y = ev.clientY - sy; this.touched = true; this.apply(); };
+      const up = () => { el.classList.remove('panning'); el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); };
+      el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
     });
+  }
+}
+
+/* Плавающее окно с картинкой поверх игры */
+class RefFrame {
+  constructor(src, { title = 'Референс', state } = {}) {
+    this.src = src;
+    this.id = 'frame-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    this.op = h('input', { type: 'range', class: 'gpp-op', min: 0.1, max: 1, step: 0.05, value: state?.op ?? Settings.get('reference', 'frameOpacity'), title: 'Прозрачность окна' });
+    this.pinBtn = h('button', { class: 'gpp-icon-btn', title: 'Закрепить: клики проходят сквозь картинку, можно рисовать под ней', html: ICON.pin, onclick: () => this.setPinned(!this.pinned) });
+    const box = Layout.screenRect();
+    this.win = new Win({
+      id: this.id, title: String(title).slice(0, 40), width: state?.w || 320, height: state?.h || 260,
+      x: state?.x ?? (box ? box.left + 20 : 120), y: state?.y ?? (box ? box.top + 60 : 120), resizable: true, className: 'gpp-frame gpp', buttons: [this.op, this.pinBtn],
+    });
+    this.viewer = new RefViewer();
+    this.viewer.tool(ICON.mirror, 'Отразить по горизонтали', b => b.classList.toggle('on', this.viewer.toggleFlip()));
+    this.viewer.tool(ICON.gray, 'Чёрно-белый просмотр', b => b.classList.toggle('on', this.viewer.toggleGray()));
+    this.viewer.tool(ICON.target, 'Вписать (двойной клик)', () => this.viewer.fit());
+    this.viewer.tool(ICON.download, 'Сохранить (Ctrl+клик)', () => saveImage(this.src, title));
+    this.viewer.tool(ICON.image, 'Вернуть в боковую панель', () => { Reference.openImage(this.src, title); this.win.hide(); });
+    this.viewer.bar.append(this.viewer.zoomVal);
+    this.viewer.hint.textContent = 'Колесо — масштаб, ЛКМ — двигать, двойной клик — вписать';
+    this.win.body.append(this.viewer.el);
+    this.op.addEventListener('input', () => { this.win.el.style.opacity = this.op.value; Reference.saveFrames(); });
+    this.win.el.style.opacity = this.op.value;
+    this.win.on('hide', () => Reference.removeFrame(this));
+    this.win.el.addEventListener('pointerup', () => Reference.saveFrames());
+    this.win.show();
+    this.viewer.load(src, title);
+    if (state?.pinned) this.setPinned(true);
   }
 
   setPinned(v) {
@@ -2316,7 +2527,7 @@ class RefFrame {
   }
 
   state() {
-    return { src: this.src, x: this.win.pos.x, y: this.win.pos.y, w: this.win.el.offsetWidth, h: this.win.el.offsetHeight, op: +this.op.value, pinned: !!this.pinned };
+    return { src: this.src, title: this.win.titleEl.textContent, x: this.win.pos.x, y: this.win.pos.y, w: this.win.el.offsetWidth, h: this.win.el.offsetHeight, op: +this.op.value, pinned: !!this.pinned };
   }
 }
 
@@ -2325,40 +2536,113 @@ const Reference = new (class {
     injectCss(REF_CSS, 'gpp-ref-css');
     this.frames = [];
     this.page = 1;
-    this.modal = new GameModal({ title: '<b>GP+</b> Референсы', width: 720, height: 620, className: 'gpp-ref' });
-    this.modal.on('open', () => { Painter.ui?.refresh(); setTimeout(() => this.q.focus(), 50); });
-    this.modal.on('close', () => Painter.ui?.refresh());
-    const b = this.modal.body;
-    this.q = h('input', { class: 'gpp-input', placeholder: 'Что ищем? Например: cat, лошадь, Eiffel tower' });
-    this.q.addEventListener('keydown', e => { if (e.key === 'Enter') this.search(true); });
-    this.engine = UI.select(Settings.get('reference', 'engine') in REF_ENGINES ? Settings.get('reference', 'engine') : 'commons',
-      Object.entries(REF_ENGINES).map(([k, v]) => [k, v.name]), v => { Settings.set('reference', 'engine', v); this.search(true); });
-    this.grid = h('div', { class: 'gpp-ref-grid' });
-    this.grid.addEventListener('scroll', () => { if (this.grid.scrollTop + this.grid.clientHeight > this.grid.scrollHeight - 80) this.search(false); });
-    this.status = h('div', { class: 'gpp-note', style: { margin: 0 } });
+    this.history = Store.get('ref.history', []);
+    this.width = Settings.get('reference', 'dockWidth');
+
+    this.q = h('input', { placeholder: 'Поиск или ссылка на картинку', spellcheck: 'false' });
+    this.q.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') this.submit(); if (e.key === 'Escape') this.q.blur(); });
+    this.engine = h('select', { title: 'Где искать' }, Object.entries(REF_ENGINES).map(([k, v]) => h('option', { value: k, selected: k === Settings.get('reference', 'engine') }, v.name)));
+    this.engine.addEventListener('change', () => { Settings.set('reference', 'engine', this.engine.value); if (this.q.value.trim()) this.search(true); });
     const file = h('input', { type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' } });
     file.addEventListener('change', () => { [...file.files].forEach(f => this.openImage(URL.createObjectURL(f), f.name, false)); file.value = ''; });
-    const url = h('input', { class: 'gpp-input', placeholder: 'Ссылка на картинку' });
-    url.addEventListener('keydown', e => { if (e.key === 'Enter' && url.value.trim()) { this.openImage(url.value.trim()); url.value = ''; } });
-    b.append(
-      h('div', { class: 'gpp-ref-bar' }, this.q, h('button', { class: 'gpp-btn primary', html: ICON.search, title: 'Искать', onclick: () => this.search(true) })),
-      h('div', { class: 'gpp-ref-bar' }, this.engine,
-        h('button', { class: 'gpp-btn', title: 'Открыть Google Картинки в новой вкладке', onclick: () => this.openExternal('google') }, 'Google ↗'),
-        h('button', { class: 'gpp-btn', title: 'Открыть Pinterest в новой вкладке', onclick: () => this.openExternal('pinterest') }, 'Pinterest ↗')),
-      this.status, this.grid,
-      h('div', { class: 'gpp-ref-drop' }, 'Перетащите картинку сюда, вставьте Ctrl+V или ',
-        h('a', { href: '#', style: { color: 'var(--gpp-accent)' }, onclick: e => { e.preventDefault(); file.click(); } }, 'выберите файл'), file),
-      url,
-    );
+    const ext = (label, where) => h('button', { class: 'gpp-icon-btn', title: `Открыть ${label} в новой вкладке`, style: { width: 'auto', padding: '0 6px', font: '11px var(--gpp-f-black)' }, onclick: () => this.openExternal(where) }, label[0]);
+    this.head = h('div', { class: 'gpp-dock-head' },
+      h('div', { class: 'gpp-dock-search' }, h('span', { html: ICON.search }), this.q,
+        h('button', { class: 'gpp-icon-btn', title: 'История открытых картинок', html: ICON.restart, style: { width: '22px', height: '22px' }, onclick: () => this.toggleHistory() })),
+      this.engine, ext('Google', 'google'), ext('Pinterest', 'pinterest'),
+      h('button', { class: 'gpp-icon-btn', title: 'Открыть файл с компьютера', html: ICON.plus, onclick: () => file.click() }), file,
+      h('button', { class: 'gpp-icon-btn', title: 'Закрыть панель (P)', html: ICON.close, onclick: () => this.close() }));
+
+    this.status = h('div', { class: 'gpp-dock-status' });
+    this.grid = h('div', { class: 'gpp-dock-grid gpp-scroll' });
+    this.grid.addEventListener('scroll', () => { if (this.grid.scrollTop + this.grid.clientHeight > this.grid.scrollHeight - 120) this.search(false); });
+    this.empty = h('div', { class: 'gpp-dock-empty', html:
+      '<b>Найдите картинку</b> по запросу (лучше на английском) или вставьте ссылку.<br><br>Картинку с компьютера или из Google/Pinterest можно <b>перетащить сюда</b> или вставить <b>Ctrl+V</b>.<br><br>' +
+      'В просмотре: колесо — масштаб, ЛКМ — двигать, двойной клик или средняя кнопка — вписать, <b>ПКМ — назад к результатам</b>, Ctrl+клик — сохранить.' });
+    this.viewer = new RefViewer();
+    this.viewer.tool(ICON.close, 'К результатам (ПКМ)', () => this.showResults());
+    this.viewer.tool(ICON.min, 'Уменьшить', () => this.viewer.zoomBy(1 / 1.25));
+    this.viewer.bar.append(this.viewer.zoomVal);
+    this.viewer.tool(ICON.plus, 'Увеличить', () => this.viewer.zoomBy(1.25));
+    this.viewer.tool(ICON.target, 'Вписать (двойной клик)', () => this.viewer.fit());
+    this.viewer.tool(ICON.mirror, 'Отразить по горизонтали', b => b.classList.toggle('on', this.viewer.toggleFlip()));
+    this.viewer.tool(ICON.gray, 'Чёрно-белый просмотр', b => b.classList.toggle('on', this.viewer.toggleGray()));
+    this.viewer.tool(ICON.pin, 'Открепить в окно поверх игры', () => this.detach());
+    this.viewer.tool(ICON.download, 'Сохранить картинку (Ctrl+клик)', () => saveImage(this.viewer.src, this.viewer.title));
+    this.viewer.hint.textContent = 'ПКМ — назад · колесо — масштаб · двойной клик — вписать';
+    this.viewer.on('back', () => this.showResults());
+    this.viewer.el.style.display = 'none';
+    this.body = h('div', { class: 'gpp-dock-body' }, this.status, this.grid, this.viewer.el);
+    this.resizer = h('div', { class: 'gpp-dock-resize', title: 'Тяните, чтобы изменить ширину. Двойной клик — минимум/максимум' });
+    this.el = h('div', { class: 'gpp gpp-dock hidden' }, this.head, this.body, this.resizer);
+    for (const t of ['pointerdown', 'mousedown', 'click', 'keydown', 'contextmenu']) this.el.addEventListener(t, e => e.stopPropagation());
+    document.body.append(this.el);
+    this.grid.append(this.empty);
+    this.bindResize();
     this.bindDrop();
     document.addEventListener('paste', e => this.onPaste(e));
-    for (const s of Store.get('ref.frames', [])) if (/^https?:/.test(s.src)) this.frames.push(new RefFrame(s.src, { state: s }));
+    Layout.on('change', () => this.place());
+    window.addEventListener('resize', () => this.place());
+    for (const s of Store.get('ref.frames', [])) if (/^https?:/.test(s.src)) this.frames.push(new RefFrame(s.src, { title: s.title, state: s }));
+    if (Store.get('ref.open', false)) setTimeout(() => this.open(), 300);
   }
 
-  open() { this.modal.open(); }
-  close() { this.modal.close(); }
-  toggle() { this.modal.toggle(); }
-  isOpen() { return !!this.modal?.isOpen; }
+  /* ───── Панель ───── */
+
+  isOpen() { return !!this.el && !this.el.classList.contains('hidden'); }
+  open() {
+    this.el.classList.remove('hidden');
+    Store.set('ref.open', true);
+    Layout.setDock(this.width + 14);
+    this.place();
+    Painter.ui?.refresh();
+    if (!this.viewer.loaded && !this.grid.querySelector('img')) this.q.focus({ preventScroll: true });
+  }
+  close() {
+    this.el.classList.add('hidden');
+    Store.set('ref.open', false);
+    Layout.setDock(0);
+    this.historyEl?.remove();
+    Painter.ui?.refresh();
+  }
+  toggle() { this.isOpen() ? this.close() : this.open(); }
+
+  place() {
+    if (!this.isOpen()) return;
+    const r = Layout.screenRect();
+    const top = r ? Math.max(4, r.top) : 8, height = r ? Math.min(r.height, innerHeight - top - 4) : innerHeight - 16;
+    const left = r ? Math.max(4, r.left - this.width - 10) : 8;
+    Object.assign(this.el.style, { left: left + 'px', top: top + 'px', width: this.width + 'px', height: height + 'px' });
+    this.grid.style.columnCount = Math.max(1, Math.round(this.width / 130));
+  }
+
+  setWidth(w) {
+    this.width = clamp(round(w), 220, Math.max(240, innerWidth * 0.6));
+    Settings.set('reference', 'dockWidth', this.width);
+    Layout.setDock(this.width + 14);
+    this.place();
+  }
+
+  bindResize() {
+    this.resizer.addEventListener('pointerdown', e => {
+      e.preventDefault(); e.stopPropagation();
+      this.resizer.setPointerCapture(e.pointerId);
+      const sx = e.clientX, sw = this.width;
+      const mv = ev => { this.width = clamp(sw + ev.clientX - sx, 220, innerWidth * 0.6); Layout.setDock(this.width + 14); this.place(); };
+      const up = () => { this.resizer.removeEventListener('pointermove', mv); this.resizer.removeEventListener('pointerup', up); this.setWidth(this.width); };
+      this.resizer.addEventListener('pointermove', mv); this.resizer.addEventListener('pointerup', up);
+    });
+    this.resizer.addEventListener('dblclick', e => { e.stopPropagation(); this.setWidth(this.width < innerWidth * 0.4 ? innerWidth * 0.6 : 240); });
+  }
+
+  /* ───── Поиск ───── */
+
+  submit() {
+    const v = this.q.value.trim();
+    if (!v) return;
+    if (/^(https?:\/\/|data:image\/)\S+$/i.test(v)) { this.q.value = ''; return this.openImage(v, 'По ссылке'); }
+    this.search(true);
+  }
 
   openExternal(where) {
     const q = encodeURIComponent(this.q.value.trim() || 'drawing reference');
@@ -2366,36 +2650,77 @@ const Reference = new (class {
   }
 
   async search(fresh) {
-    const q = this.q.value.trim();
+    const q = fresh ? this.q.value.trim() : this.lastQuery;
     if (!q || this.loading || (!fresh && !this.more)) return;
-    if (fresh) { this.page = 1; this.grid.replaceChildren(); this.grid.scrollTop = 0; }
+    if (fresh) { this.page = 1; this.grid.replaceChildren(); this.grid.scrollTop = 0; this.lastQuery = q; }
+    this.showResults();
+    this.empty.remove();
     this.loading = true;
     this.status.textContent = 'Ищу…';
-    const eng = REF_ENGINES[this.engine.value];
+    const eng = REF_ENGINES[this.engine.value] || REF_ENGINES.commons;
     try {
       const { items, more } = await eng.search(q, this.page);
       this.more = more; this.page++;
       for (const it of items) {
-        const img = h('img', { src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h}`, onclick: e => { this.openImage(it.full, q); if (!e.shiftKey) this.close(); } });
-        this.grid.append(img);
+        this.grid.append(h('img', {
+          src: it.thumb, loading: 'lazy', referrerpolicy: 'no-referrer', title: `${it.w}×${it.h} · Shift+клик — сразу в окно поверх игры`,
+          onclick: e => (e.shiftKey ? this.detachSrc(it.full, q) : this.openImage(it.full, q, true, it.thumb)),
+        }));
       }
-      this.status.textContent = this.grid.children.length ? `Найдено: ${this.grid.children.length}${more ? '+' : ''}. Клик — открыть поверх игры, Shift+клик — открыть и выбрать ещё.` : 'Ничего не найдено. Попробуйте запрос на английском.';
+      const n = this.grid.querySelectorAll('img').length;
+      this.status.textContent = n ? `${eng.name}: ${n}${more ? '+' : ''} картинок по запросу «${q}»` : 'Ничего не найдено. Попробуйте запрос на английском или другой источник.';
     } catch (e) {
       this.status.textContent = `${eng.name}: ${e.message}. Попробуйте другой источник.`;
     } finally { this.loading = false; }
   }
 
+  showResults() {
+    this.viewer.el.style.display = 'none';
+    this.status.style.display = this.grid.style.display = '';
+    if (!this.grid.children.length) this.grid.append(this.empty);
+  }
+
+  /* ───── Просмотр ───── */
+
+  openImage(src, title = 'Референс', remember = true, thumb) {
+    if (!this.isOpen()) this.open();
+    this.historyEl?.remove();
+    this.status.style.display = this.grid.style.display = 'none';
+    this.viewer.el.style.display = '';
+    this.viewer.load(src, title);
+    if (remember && /^https?:/.test(src)) {
+      this.history = [{ src, title, thumb: thumb || src }, ...this.history.filter(x => x.src !== src)].slice(0, 40);
+      Store.set('ref.history', this.history);
+    }
+  }
+
+  toggleHistory() {
+    if (this.historyEl?.isConnected) return this.historyEl.remove();
+    this.historyEl = h('div', { class: 'gpp-history gpp-scroll' },
+      this.history.length ? this.history.map(it => h('img', { src: it.thumb, title: it.title, referrerpolicy: 'no-referrer', onclick: () => this.openImage(it.src, it.title, true, it.thumb) }))
+        : h('div', { class: 'gpp-note', style: { gridColumn: '1/-1' } }, 'История пуста'));
+    this.body.append(this.historyEl);
+  }
+
+  detach() { if (this.viewer.src) { this.detachSrc(this.viewer.src, this.viewer.title); this.showResults(); } }
+  detachSrc(src, title) {
+    const f = new RefFrame(src, { title });
+    f.persist = /^https?:/.test(src);
+    this.frames.push(f);
+    this.saveFrames();
+  }
+
   bindDrop() {
-    const el = this.modal.dialog;
+    const el = this.el;
     el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('dragover'); });
     el.addEventListener('dragleave', () => el.classList.remove('dragover'));
     el.addEventListener('drop', e => {
       e.preventDefault(); el.classList.remove('dragover');
       const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
-      if (files.length) return files.forEach(f => this.openImage(URL.createObjectURL(f), f.name, false));
+      if (files.length) return this.openImage(URL.createObjectURL(files[0]), files[0].name, false);
       const html = e.dataTransfer.getData('text/html');
       const src = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-      if (src && /^(https?:|data:image)/.test(src.trim())) this.openImage(src.trim().replace(/&amp;/g, '&'));
+      if (src && /^(https?:|data:image)/.test(src.trim())) this.openImage(src.trim().replace(/&amp;/g, '&'), 'Перетащено');
     });
   }
 
@@ -2403,15 +2728,8 @@ const Reference = new (class {
     if (isTyping(e) || !(this.isOpen() || Painter.active)) return;
     const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
     if (item) { e.preventDefault(); this.openImage(URL.createObjectURL(item.getAsFile()), 'Из буфера', false); return; }
-    const text = e.clipboardData?.getData('text');
-    if (text && /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(text.trim())) { e.preventDefault(); this.openImage(text.trim()); }
-  }
-
-  openImage(src, title = 'Референс', persist = true) {
-    const f = new RefFrame(src, { title: String(title).slice(0, 40) });
-    f.persist = persist && /^https?:/.test(src);
-    this.frames.push(f);
-    this.saveFrames();
+    const text = e.clipboardData?.getData('text')?.trim();
+    if (text && /^https?:\/\/\S+$/i.test(text)) { e.preventDefault(); this.openImage(text, 'По ссылке'); }
   }
 
   removeFrame(f) {
@@ -2426,85 +2744,291 @@ const Reference = new (class {
 })();
 /* ───────────────────────────── Таймлапс ─────────────────────────────
    Рисунок в альбоме приходит списком штрихов, поэтому процесс рисования можно воспроизвести.
-   Открыть: двойной клик / средняя кнопка по рисунку в альбоме или кнопка ▶ на рисунке.        */
+   Открыть: кнопка «Таймлапс», двойной клик или средняя кнопка по рисунку в альбоме.
+   Время каждого штриха игра не передаёт: для чужих рисунков график строится по ходу рисования,
+   для своих скрипт записывает реальное время штрихов во время хода.                        */
 
 const PLAYER_CSS = `
-.gpp-player .gpp-win-body{padding:10px;display:flex;flex-direction:column;gap:8px}
-.gpp-player canvas{width:100%;flex:1;min-height:0;object-fit:contain;background:transparent;display:block}
-.gpp-player-ctrl{display:flex;align-items:center;gap:6px}
-.gpp-player-ctrl input[type=range]{flex:1;accent-color:var(--gpp-accent);min-width:0}
-.gpp-player-ctrl .gpp-select{padding:3px 4px;font-size:12px}
-.gpp-player-time{color:var(--gpp-dim);font:12px var(--gpp-f-bold);font-variant-numeric:tabular-nums;width:74px;text-align:right}
-.gpp-inline{position:absolute;inset:0;z-index:4;background:#fff;border-radius:inherit;overflow:hidden}
-.gpp-inline canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.gpp-inline .gpp-player-ctrl{position:absolute;left:8px;right:8px;bottom:8px;padding:5px 6px;border-radius:10px;background:var(--gpp-head);
-box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 3px 0 rgba(23,5,87,.5);opacity:0;transform:translateY(6px);transition:opacity .15s,transform .15s}
-.gpp-inline:hover .gpp-player-ctrl,.gpp-inline.paused .gpp-player-ctrl{opacity:1;transform:none}
+.gpp-tl{position:relative;overflow:hidden;background:#fff;user-select:none;outline:none;color:#fff;font:12px var(--gpp-f-bold)}
+.gpp-tl canvas.gpp-tl-cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:pointer}
+.gpp-tl.inline{position:absolute;inset:0;z-index:4;border-radius:inherit}
+.gpp-tl.window{width:100%;height:100%;border-radius:0 0 12px 12px}
+.gpp-tl.expanded,.gpp-tl:fullscreen{background:#0b0620}
+.gpp-tl-expand-host{position:absolute;inset:0;z-index:250;background:rgba(10,4,30,.92);padding:14px;border-radius:inherit}
+.gpp-tl-expand-host .gpp-tl{width:100%;height:100%;border-radius:12px}
+.gpp-tl-close{position:absolute;right:8px;top:8px;z-index:6;width:30px;height:30px;border-radius:8px;border:0;background:rgba(23,5,87,.55);color:#fff;cursor:pointer;display:grid;place-items:center;opacity:0;transition:opacity .15s}
+.gpp-tl-close svg{width:16px;height:16px}
+.gpp-tl:hover .gpp-tl-close,.gpp-tl.paused .gpp-tl-close{opacity:1}
+.gpp-tl-bottom{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:26px 10px 6px;background:linear-gradient(transparent,rgba(12,4,40,.82));opacity:0;transition:opacity .2s}
+.gpp-tl:hover .gpp-tl-bottom,.gpp-tl.paused .gpp-tl-bottom{opacity:1}
+.gpp-tl-chart{display:block;width:100%;height:24px;cursor:pointer}
+.gpp-tl-bar{position:relative;height:5px;margin:3px 0 6px;border-radius:3px;background:rgba(255,255,255,.25);cursor:pointer}
+.gpp-tl-bar:hover{height:7px;margin:2px 0 5px}
+.gpp-tl-fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--gpp-accent)}
+.gpp-tl-knob{position:absolute;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--gpp-accent)}
+.gpp-tl-ctrl{display:flex;align-items:center;gap:2px}
+.gpp-tl-ctrl .gpp-icon-btn{width:30px;height:28px}
+.gpp-tl-ctrl .gpp-icon-btn svg{width:17px;height:17px}
+.gpp-tl-speed{position:relative;min-width:44px;height:24px;padding:0 7px;border-radius:7px;background:rgba(255,255,255,.14);display:grid;place-items:center;cursor:ew-resize;font:12px var(--gpp-f-black)}
+.gpp-tl-speed:hover{background:rgba(255,255,255,.24)}
+.gpp-tl-speedpop{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);width:180px;padding:8px 10px;border-radius:9px;background:var(--gpp-head);box-shadow:inset 0 0 0 2px var(--gpp-head-hi);display:none}
+.gpp-tl-speed.active .gpp-tl-speedpop{display:block}
+.gpp-tl-speedpop .track{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.25)}
+.gpp-tl-speedpop .fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--gpp-accent)}
+.gpp-tl-count{margin-left:8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.gpp-tl-count small{color:var(--gpp-dim);font:11px var(--gpp-f-reg);margin-left:6px}
+.gpp-tl-sp{flex:1}
+.gpp-tl-tip{position:absolute;bottom:100%;transform:translateX(-50%);margin-bottom:4px;padding:5px 8px;border-radius:7px;background:var(--gpp-edge);white-space:nowrap;font:11px var(--gpp-f-bold);pointer-events:none;display:none}
+.gpp-tl-pop{position:absolute;inset:0;z-index:7;display:none;align-items:center;justify-content:center;background:rgba(12,4,40,.55);backdrop-filter:blur(6px)}
+.gpp-tl-pop.open{display:flex}
+.gpp-tl-menu{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;padding:10px}
+.gpp-tl-menu button{width:104px;padding:12px 6px;border:0;border-radius:12px;background:var(--gpp-head);box-shadow:inset 0 0 0 2px var(--gpp-head-hi),0 3px 0 rgba(0,0,0,.3);color:#fff;cursor:pointer;
+display:flex;flex-direction:column;align-items:center;gap:7px;font:11.5px/1.2 var(--gpp-f-bold)}
+.gpp-tl-menu button:hover{box-shadow:inset 0 0 0 2px var(--gpp-accent),0 3px 0 rgba(0,0,0,.3)}
+.gpp-tl-menu svg{width:26px;height:26px}
+.gpp-tl-stats{max-width:min(420px,92%);max-height:88%;overflow:auto;padding:12px 16px;border-radius:12px;background:var(--gpp-book);box-shadow:inset 0 0 0 2px var(--gpp-head)}
+.gpp-tl-stats h4{margin:0 0 8px;font:14px var(--gpp-f-black);text-transform:uppercase;color:var(--gpp-accent)}
+.gpp-tl-stats table{width:100%;border-collapse:collapse;font:12px var(--gpp-f-bold)}
+.gpp-tl-stats td{padding:3px 0}.gpp-tl-stats td:last-child{text-align:right;font-variant-numeric:tabular-nums;padding-left:12px}
+.gpp-tl-stats .sw{display:inline-block;width:16px;height:16px;border-radius:3px;box-shadow:0 0 0 1px rgba(255,255,255,.5)}
+.gpp-tl-rec{color:#ff5a7a !important}
+.gpp-tl.inline:not(.expanded) .gpp-tl-opt{display:none}
+.gpp-tl.inline:not(.expanded) .gpp-tl-ctrl .gpp-icon-btn{width:27px}
+.gpp-player .gpp-win-body{padding:0;overflow:hidden}
 .gpp-play-badge{position:absolute;right:8px;bottom:8px;z-index:3;height:34px;padding:0 12px 0 9px;border-radius:9px;border:0;cursor:pointer;display:flex;align-items:center;gap:5px;
 background:linear-gradient(#8dffd0,#3ee6a0);color:rgb(23,5,87);font:13px/1 var(--gpp-f-black);text-transform:uppercase;box-shadow:inset 0 0 0 2px #c8ffe8,0 3px 0 #1f9e6c;opacity:.92}
 .gpp-play-badge:hover{opacity:1;filter:brightness(1.05)}
 .gpp-play-badge svg{width:14px;height:14px}
-.gpp-rec{color:#ff5a7a !important}
 `;
 
-/* «Стоимость» штриха во времени: 60 единиц = 1 секунда на скорости ×1.
-   Пауза между штрихами (STROKE_GAP) делает короткие рисунки различимыми. */
-const STROKE_GAP = 12;
-function strokeCost(v) {
-  if (v[0] === TOOL.PEN || v[0] === TOOL.ERASER) return STROKE_GAP + Math.max(1, (v.length - 3) / 2);
-  return STROKE_GAP + (v[0] === TOOL.FILL ? 18 : 14);
+const TL_ICON = {
+  start: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2.5h2v11H3zM13 2.5v11L5.5 8z"/></svg>',
+  end: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M11 2.5h2v11h-2zM3 2.5v11L10.5 8z"/></svg>',
+  slower: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3v10L1.5 8zM15 3v10L8.5 8z"/></svg>',
+  faster: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 3v10l6.5-5zM8 3v10l6.5-5z"/></svg>',
+  expand: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10"/></svg>',
+  collapse: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 6H6V2.5M13.5 6H10V2.5M2.5 10H6v3.5M13.5 10H10v3.5"/></svg>',
+  full: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 6h2M5 6v2M11 10H9M11 10V8" stroke-linecap="round"/></svg>',
+  stats: '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="8" width="2.6" height="6" rx=".6"/><rect x="6.7" y="4" width="2.6" height="10" rx=".6"/><rect x="11.4" y="6" width="2.6" height="8" rx=".6"/></svg>',
+  json: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 4H6a2 2 0 0 0-2 2v4l-1.5 2L4 14v4a2 2 0 0 0 2 2h2M16 4h2a2 2 0 0 1 2 2v4l1.5 2-1.5 2v4a2 2 0 0 1-2 2h-2"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/></svg>',
+};
+
+const SPEEDS = [1, 2, 3, 5, 10, 15, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800];
+const TOOL_STAT_NAMES = { 1: 'Кисть', 2: 'Ластик', 3: 'Линии', 4: 'Прямоугольники', 5: 'Эллипсы', 6: 'Прямоугольники залитые', 7: 'Эллипсы залитые', 8: 'Заливки' };
+
+function strokePoints(v) { return v[0] === TOOL.PEN || v[0] === TOOL.ERASER ? Math.max(1, (v.length - 3) / 2) : 1; }
+function strokeColor(v) { return v[0] === TOOL.ERASER ? '#ffffff' : Array.isArray(v[2]) ? v[2][0] : '#000000'; }
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
 }
 
-function partialStroke(v, k) {
-  if (v[0] !== TOOL.PEN && v[0] !== TOOL.ERASER) return v;
-  return v.slice(0, 3 + 2 * Math.max(1, Math.floor(k - STROKE_GAP)));
-}
-
-/* Плеер работает в двух видах: прямо в карточке рисунка альбома (host) или в отдельном окне. */
-class Player {
-  constructor(strokes, { title, W = 1516, H = 848, host = null }) {
-    this.strokes = strokes.filter(Array.isArray);
-    this.costs = this.strokes.map(strokeCost);
-    this.total = this.costs.reduce((a, b) => a + b, 0) || 1;
-    this.W = W; this.H = H; this.title = title;
-    this.t = 0; this.done = 0; this.playing = false;
-    this.layer = h('canvas', { width: W, height: H });
-    this.lctx = this.layer.getContext('2d');
-    this.canvas = h('canvas', { width: W, height: H });
-    this.ctx = this.canvas.getContext('2d');
-
-    this.playBtn = h('button', { class: 'gpp-icon-btn', title: 'Пуск / пауза (пробел)', html: ICON.play, onclick: () => this.toggle() });
-    this.seek = h('input', { type: 'range', min: 0, max: this.total, step: 0.5, value: 0 });
-    this.seek.addEventListener('input', () => { this.pause(); this.seekTo(+this.seek.value); });
-    this.time = h('span', { class: 'gpp-player-time' });
-    this.speed = UI.select(String(Settings.get('player', 'speed')), [['0.25', '×0.25'], ['0.5', '×0.5'], ['1', '×1'], ['2', '×2'], ['4', '×4'], ['8', '×8'], ['16', '×16']], v => Settings.set('player', 'speed', +v));
-    this.recBtn = h('button', { class: 'gpp-icon-btn', title: 'Записать видео WebM', html: ICON.video, onclick: () => this.record() });
-    this.ctrl = h('div', { class: 'gpp-player-ctrl' },
-      this.playBtn,
-      h('button', { class: 'gpp-icon-btn', title: 'С начала', html: ICON.restart, onclick: () => { this.seekTo(0); this.play(); } }),
-      this.seek, this.time, this.speed,
-      h('button', { class: 'gpp-icon-btn', title: 'Сохранить PNG', html: ICON.download, onclick: () => this.savePng() }),
-      this.recBtn);
-
-    if (host) {
-      this.root = h('div', { class: 'gpp gpp-inline paused' }, this.canvas, this.ctrl);
-      this.ctrl.append(
-        h('button', { class: 'gpp-icon-btn', title: 'Открыть в большом окне', html: ICON.target, onclick: () => this.popOut() }),
-        h('button', { class: 'gpp-icon-btn', title: 'Закрыть плеер', html: ICON.close, onclick: () => this.close() }));
-      for (const t of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick']) this.root.addEventListener(t, e => e.stopPropagation());
-      this.root.addEventListener('click', e => { if (e.target === this.canvas) this.toggle(); });
-      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-      host.append(this.root);
+/* Ось графика и перемотки: реальное время (свои рисунки) или «ход рисования» (объём штрихов) */
+class TimelapseData {
+  constructor(strokes, times) {
+    this.strokes = strokes;
+    this.N = strokes.length;
+    this.pts = strokes.map(strokePoints);
+    this.start = new Float64Array(this.N);
+    this.end = new Float64Array(this.N);
+    this.real = !!(times && times.length === this.N && times.every(Boolean));
+    if (this.real) {
+      const t0 = Math.min(...times.map(t => t[0]));
+      times.forEach(([a, b], i) => { this.start[i] = (a - t0) / 1000; this.end[i] = Math.max(this.start[i] + 0.05, (b - t0) / 1000); });
     } else {
-      this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + (title || 'Таймлапс'), width: 640, height: 450, x: 120, y: 80, resizable: true, className: 'gpp-player gpp' });
-      this.win.body.append(this.canvas, this.ctrl);
-      this.win.body.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); this.toggle(); } });
-      this.win.body.tabIndex = 0;
-      this.win.on('hide', () => this.close());
-      this.win.show();
+      let acc = 0;
+      this.pts.forEach((n, i) => { this.start[i] = acc; acc += n + 4; this.end[i] = acc; });
     }
-    this.seekTo(Settings.get('player', 'autoplay') ? 0 : this.total);
-    if (Settings.get('player', 'autoplay')) this.play();
+    this.total = this.N ? Math.max(...this.end) : 1;
+  }
+
+  axisAt(p) {
+    if (p >= this.N) return this.total;
+    const i = Math.floor(p), f = p - i;
+    return this.start[i] + f * (this.end[i] - this.start[i]);
+  }
+
+  /* Позиция в штрихах по значению оси (штрихи упорядочены по началу) */
+  pAt(a) {
+    if (a <= 0 || !this.N) return 0;
+    if (a >= this.total) return this.N;
+    let lo = 0, hi = this.N - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (this.start[mid] <= a) lo = mid; else hi = mid - 1; }
+    if (a >= this.end[lo]) return lo + 1;
+    return lo + (a - this.start[lo]) / (this.end[lo] - this.start[lo]);
+  }
+
+  bins(n) {
+    const out = Array.from({ length: n }, () => ({ count: 0, colors: new Map(), from: Infinity, to: -1 }));
+    this.strokes.forEach((v, i) => {
+      const bin = out[Math.min(n - 1, Math.floor((this.start[i] / this.total) * n))];
+      bin.count++; bin.from = Math.min(bin.from, i); bin.to = Math.max(bin.to, i);
+      const c = strokeColor(v);
+      bin.colors.set(c, (bin.colors.get(c) || 0) + this.pts[i]);
+    });
+    for (const b of out) b.color = [...b.colors].sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+    return out;
+  }
+
+  stats() {
+    const byTool = new Map(), colors = new Map();
+    this.strokes.forEach((v, i) => {
+      byTool.set(v[0], (byTool.get(v[0]) || 0) + 1);
+      if (v[0] !== TOOL.ERASER) colors.set(strokeColor(v), (colors.get(strokeColor(v)) || 0) + this.pts[i]);
+    });
+    return { byTool, colors: [...colors].sort((a, b) => b[1] - a[1]) };
+  }
+}
+
+class Player {
+  constructor(strokes, { title, W = 1516, H = 848, host = null, times = null, author = '' }) {
+    this.strokes = strokes.filter(Array.isArray);
+    this.data = new TimelapseData(this.strokes, times);
+    this.times = this.data.real ? times : null;
+    this.W = W; this.H = H; this.title = title || 'Таймлапс'; this.author = author;
+    this.p = 0; this.done = 0; this.playing = false;
+    const saved = SPEEDS.indexOf(+Settings.get('player', 'speed'));
+    this.speedIdx = saved >= 0 ? saved : 4;
+    this.build();
+    if (host) this.mountInline(host); else this.mountWindow();
+    this.resize();
+    this.ro = new ResizeObserver(() => this.resize());
+    this.ro.observe(this.root);
+    this.onFs = () => { this.resize(true); };
+    document.addEventListener('fullscreenchange', this.onFs);
+    if (Settings.get('player', 'autoplay')) this.play(); else this.seek(this.data.N);
+  }
+
+  /* ───── Интерфейс ───── */
+
+  build() {
+    const btn = (icon, title, fn) => h('button', { class: 'gpp-icon-btn', title, html: icon, onclick: e => { e.stopPropagation(); fn(); } });
+    this.canvas = h('canvas', { class: 'gpp-tl-cv' });
+    this.ctx = this.canvas.getContext('2d');
+    this.layer = h('canvas');
+    this.lctx = this.layer.getContext('2d');
+    this.chart = h('canvas', { class: 'gpp-tl-chart' });
+    this.tip = h('div', { class: 'gpp-tl-tip' });
+    this.fill = h('div', { class: 'gpp-tl-fill' });
+    this.knob = h('div', { class: 'gpp-tl-knob' });
+    this.bar = h('div', { class: 'gpp-tl-bar', title: 'Перемотка' }, this.fill, this.knob);
+    this.playBtn = btn(ICON.play, 'Пуск / пауза (пробел, клик по рисунку)', () => this.toggle());
+    this.speedFill = h('div', { class: 'fill' });
+    this.speedLabel = h('span');
+    this.speedEl = h('div', { class: 'gpp-tl-speed', title: 'Скорость: зажмите и ведите вбок или крутите колесо. До x100 штрихи рисуются плавно, выше — мгновенно' }, this.speedLabel,
+      h('div', { class: 'gpp-tl-speedpop' }, h('div', { class: 'track' }, this.speedFill)));
+    this.count = h('div', { class: 'gpp-tl-count' });
+    this.expandBtn = btn(TL_ICON.expand, 'Развернуть на весь интерфейс игры (средняя кнопка мыши)', () => this.toggleExpand());
+    this.recBtn = btn(ICON.video, 'Записать видео WebM', () => this.record());
+    this.recBtn.classList.add('gpp-tl-opt');
+    this.ctrl = h('div', { class: 'gpp-tl-ctrl' },
+      this.playBtn,
+      btn(TL_ICON.start, 'К первому штриху (Home)', () => this.seek(0)),
+      btn(TL_ICON.slower, 'Медленнее', () => this.setSpeed(this.speedIdx - 1)),
+      btn(TL_ICON.faster, 'Быстрее', () => this.setSpeed(this.speedIdx + 1)),
+      btn(TL_ICON.end, 'К последнему штриху (End)', () => { this.pause(); this.seek(this.data.N); }),
+      this.speedEl, this.count, h('div', { class: 'gpp-tl-sp' }),
+      btn(TL_ICON.stats, 'Статистика штрихов', () => this.showStats()),
+      this.recBtn,
+      Object.assign(btn(ICON.download, 'Сохранить (меню по правой кнопке)', () => this.showMenu()), { className: 'gpp-icon-btn gpp-tl-opt' }),
+      this.expandBtn,
+      btn(TL_ICON.full, 'Полноэкранный режим без рамок (двойной клик, F)', () => this.toggleFullscreen()));
+    this.bottom = h('div', { class: 'gpp-tl-bottom' }, h('div', { style: { position: 'relative' } }, this.chart, this.tip), this.bar, this.ctrl);
+    this.pop = h('div', { class: 'gpp-tl-pop', onclick: e => { if (e.target === this.pop) this.closePop(); } });
+    this.closeBtn = h('button', { class: 'gpp-tl-close', title: 'Закрыть плеер', html: ICON.close, onclick: e => { e.stopPropagation(); this.close(); } });
+    this.root = h('div', { class: 'gpp gpp-tl paused', tabindex: 0 }, this.canvas, this.closeBtn, this.bottom, this.pop);
+    this.bindInput();
+    this.setSpeed(this.speedIdx, false);
+  }
+
+  bindInput() {
+    const r = this.root;
+    for (const t of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick', 'wheel', 'keydown', 'contextmenu']) r.addEventListener(t, e => e.stopPropagation());
+    this.canvas.addEventListener('click', () => { clearTimeout(this.clickTimer); this.clickTimer = setTimeout(() => this.toggle(), 220); });
+    this.canvas.addEventListener('dblclick', () => { clearTimeout(this.clickTimer); this.toggleFullscreen(); });
+    r.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+    r.addEventListener('auxclick', e => { if (e.button === 1) { e.preventDefault(); document.fullscreenElement ? document.exitFullscreen() : this.toggleExpand(); } });
+    r.addEventListener('contextmenu', e => { e.preventDefault(); this.showMenu(); });
+    r.addEventListener('mouseenter', () => r.focus({ preventScroll: true }));
+    r.addEventListener('keydown', e => {
+      const k = e.code;
+      if (k === 'Space') { e.preventDefault(); this.toggle(); }
+      else if (k === 'ArrowRight') { this.pause(); this.seek(Math.floor(this.p) + 1); }
+      else if (k === 'ArrowLeft') { this.pause(); this.seek(Math.ceil(this.p) - 1); }
+      else if (k === 'Home') this.seek(0);
+      else if (k === 'End') { this.pause(); this.seek(this.data.N); }
+      else if (k === 'KeyF') this.toggleFullscreen();
+      else if (k === 'Escape' && this.expandHost && !document.fullscreenElement) this.toggleExpand();
+    });
+    const seekAt = (el, e) => { const b = el.getBoundingClientRect(); this.seek(this.data.pAt(clamp((e.clientX - b.left) / b.width, 0, 1) * this.data.total)); };
+    for (const el of [this.bar, this.chart]) {
+      el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const wasPlaying = this.playing;
+        this.pause();
+        el.setPointerCapture(e.pointerId);
+        seekAt(el, e);
+        const mv = ev => seekAt(el, ev);
+        const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); if (wasPlaying && this.p < this.data.N) this.play(); };
+        el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
+      });
+    }
+    this.chart.addEventListener('pointermove', e => this.chartTip(e));
+    this.chart.addEventListener('pointerleave', () => { this.tip.style.display = 'none'; });
+    this.speedEl.addEventListener('wheel', e => { e.preventDefault(); this.setSpeed(this.speedIdx + (e.deltaY < 0 ? 1 : -1)); }, { passive: false });
+    this.speedEl.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      this.speedEl.setPointerCapture(e.pointerId);
+      this.speedEl.classList.add('active');
+      const sx = e.clientX, si = this.speedIdx;
+      const mv = ev => this.setSpeed(si + Math.round((ev.clientX - sx) / 12));
+      const up = () => { this.speedEl.classList.remove('active'); this.speedEl.removeEventListener('pointermove', mv); this.speedEl.removeEventListener('pointerup', up); };
+      this.speedEl.addEventListener('pointermove', mv); this.speedEl.addEventListener('pointerup', up);
+    });
+  }
+
+  mountInline(host) {
+    this.host = host;
+    this.root.classList.add('inline');
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    host.append(this.root);
+  }
+
+  mountWindow() {
+    this.win = new Win({ id: 'player', title: '<b>GP+</b> ' + this.title, width: 720, height: 460, x: 120, y: 80, resizable: true, className: 'gpp-player gpp' });
+    this.root.classList.add('window');
+    this.win.body.append(this.root);
+    this.win.on('hide', () => this.close());
+    this.win.show();
+  }
+
+  toggleExpand() {
+    if (this.expandHost) {
+      this.expandHost.remove(); this.expandHost = null;
+      (this.host || this.win.body).append(this.root);
+      this.root.classList.remove('expanded');
+      this.expandBtn.innerHTML = TL_ICON.expand;
+    } else {
+      const screen = document.querySelector('.screen');
+      this.expandHost = h('div', { class: 'gpp-tl-expand-host gpp' });
+      this.expandHost.addEventListener('pointerdown', e => { if (e.target === this.expandHost) this.toggleExpand(); });
+      (screen || document.body).append(this.expandHost);
+      if (!screen) Object.assign(this.expandHost.style, { position: 'fixed', zIndex: 2147483200 });
+      this.expandHost.append(this.root);
+      this.root.classList.add('expanded');
+      this.expandBtn.innerHTML = TL_ICON.collapse;
+    }
+    this.root.focus({ preventScroll: true });
+    this.resize(true);
+  }
+
+  toggleFullscreen() {
+    if (document.fullscreenElement) return document.exitFullscreen();
+    this.root.requestFullscreen?.().catch(() => toast('Браузер не разрешил полноэкранный режим'));
   }
 
   close() {
@@ -2512,103 +3036,241 @@ class Player {
     this.closed = true;
     this.pause();
     if (this.recorder?.state === 'recording') this.recorder.stop();
-    this.root?.remove();
-    if (this.win) { this.win.el.remove(); }
+    if (document.fullscreenElement === this.root) document.exitFullscreen();
+    document.removeEventListener('fullscreenchange', this.onFs);
+    this.ro.disconnect();
+    this.expandHost?.remove();
+    this.root.remove();
+    if (this.win) this.win.el.remove();
     if (Timelapse.current === this) Timelapse.current = null;
   }
 
-  popOut() {
-    const t = this.t;
-    this.close();
-    Timelapse.current = new Player(this.strokes, { title: this.title, W: this.W, H: this.H });
-    Timelapse.current.pause();
-    Timelapse.current.seekTo(t);
-    Timelapse.current.play();
+  /* ───── Отрисовка: холст в размер экрана, штрихи векторные — чётко в любом режиме ───── */
+
+  resize(force) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(10, round(this.root.clientWidth * dpr)), hh = Math.max(10, round(this.root.clientHeight * dpr));
+    if (!force && w === this.canvas.width && hh === this.canvas.height) return;
+    this.canvas.width = this.layer.width = w;
+    this.canvas.height = this.layer.height = hh;
+    const k = Math.min(w / this.W, hh / this.H);
+    this.view = { k, ox: (w - this.W * k) / 2, oy: (hh - this.H * k) / 2 };
+    this.rebuildLayer(Math.floor(this.p));
+    const cw = this.chart.clientWidth || this.root.clientWidth - 20;
+    this.chart.width = Math.max(10, round(cw * dpr)); this.chart.height = round(24 * dpr);
+    const maxBins = clamp(round(cw / 5), 20, 160);
+    // реальное время: «круглый» шаг столбиков (1, 2, 5, 10… секунд), чтобы отрезки читались
+    const step = this.data.real ? [1, 2, 5, 10, 15, 30, 60, 120, 300].find(st => this.data.total / st <= maxBins) || 600 : 0;
+    this.bins = this.data.bins(step ? Math.max(1, Math.ceil(this.data.total / step)) : maxBins);
+    this.paint();
   }
 
-  seekTo(t) {
-    t = clamp(t, 0, this.total);
-    if (t < this.t || t === 0) { this.lctx.clearRect(0, 0, this.W, this.H); this.done = 0; this.acc = 0; }
-    this.t = t;
-    let acc = this.acc || 0;
-    while (this.done < this.strokes.length && acc + this.costs[this.done] <= t) {
-      renderStroke(this.lctx, this.strokes[this.done]);
-      acc += this.costs[this.done];
-      this.done++;
-    }
-    this.acc = acc;
-    this.paint(t - acc);
+  withView(ctx, fn) {
+    const { k, ox, oy } = this.view;
+    ctx.save();
+    ctx.setTransform(k, 0, 0, k, ox, oy);
+    ctx.beginPath(); ctx.rect(0, 0, this.W, this.H); ctx.clip();
+    fn(ctx);
+    ctx.restore();
   }
 
-  paint(partial) {
-    const c = this.ctx;
-    c.fillStyle = '#fff'; c.fillRect(0, 0, this.W, this.H);
-    if (partial > STROKE_GAP && this.done < this.strokes.length) {
-      const v = this.strokes[this.done];
+  rebuildLayer(n) {
+    if (!this.view) return;
+    this.lctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.lctx.clearRect(0, 0, this.layer.width, this.layer.height);
+    this.withView(this.lctx, c => { for (let i = 0; i < n; i++) renderStroke(c, this.strokes[i]); });
+    this.done = n;
+  }
+
+  seek(p) {
+    p = clamp(p, 0, this.data.N);
+    const n = Math.floor(p);
+    if (n < this.done) this.rebuildLayer(n);
+    else if (n > this.done) { this.withView(this.lctx, c => { for (let i = this.done; i < n; i++) renderStroke(c, this.strokes[i]); }); this.done = n; }
+    this.p = p;
+    this.paint();
+  }
+
+  paint() {
+    if (!this.view) return;
+    const c = this.ctx, { k, ox, oy } = this.view;
+    const dark = this.root.classList.contains('expanded') || document.fullscreenElement === this.root;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = dark ? '#0b0620' : '#fff';
+    c.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    c.fillStyle = '#fff';
+    c.fillRect(ox, oy, this.W * k, this.H * k);
+    const f = this.p - this.done, v = this.strokes[this.done];
+    if (f > 0 && v && (v[0] === TOOL.PEN || v[0] === TOOL.ERASER)) {
+      const part = v.slice(0, 3 + 2 * Math.max(1, Math.ceil(f * strokePoints(v))));
       if (v[0] === TOOL.ERASER) {
         const tmp = Player.tmp ||= h('canvas');
-        tmp.width = this.W; tmp.height = this.H;
+        tmp.width = this.layer.width; tmp.height = this.layer.height;
         const tc = tmp.getContext('2d');
-        tc.drawImage(this.layer, 0, 0); renderStroke(tc, partialStroke(v, partial));
+        tc.drawImage(this.layer, 0, 0);
+        this.withView(tc, x => renderStroke(x, part));
         c.drawImage(tmp, 0, 0);
       } else {
         c.drawImage(this.layer, 0, 0);
-        if (v[0] === TOOL.PEN) renderStroke(c, partialStroke(v, partial));
+        this.withView(c, x => renderStroke(x, part));
       }
     } else c.drawImage(this.layer, 0, 0);
-    this.seek.value = this.t;
-    const sec = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
-    this.time.textContent = `${sec(this.t / 60)} / ${sec(this.total / 60)}`;
+    this.updateUi();
+  }
+
+  updateUi() {
+    const d = this.data, frac = d.axisAt(this.p) / d.total;
+    this.fill.style.width = frac * 100 + '%';
+    this.knob.style.left = frac * 100 + '%';
+    const cur = Math.min(d.N, Math.ceil(this.p - 1e-9));
+    this.count.innerHTML = `${cur} / ${d.N} <small>${d.real ? fmtTime(d.axisAt(this.p)) + ' / ' + fmtTime(d.total) : plural(d.N, 'штрих', 'штриха', 'штрихов')}</small>`;
+    this.drawChart(frac);
+  }
+
+  drawChart(frac) {
+    const c = this.chart.getContext('2d'), w = this.chart.width, hh = this.chart.height, bins = this.bins || [];
+    c.clearRect(0, 0, w, hh);
+    if (!bins.length) return;
+    const max = Math.max(1, ...bins.map(b => b.count)), bw = w / bins.length;
+    bins.forEach((b, i) => {
+      if (!b.count) return;
+      const bh = Math.max(2, (b.count / max) * (hh - 2));
+      c.globalAlpha = (i + 0.5) / bins.length <= frac ? 1 : 0.4;
+      c.fillStyle = b.color && b.color.toLowerCase() !== '#ffffff' ? b.color : '#cfc6ff';
+      c.fillRect(i * bw + 0.5, hh - bh, Math.max(1, bw - 1), bh);
+    });
+    c.globalAlpha = 1;
+    c.fillStyle = '#fff';
+    c.fillRect(Math.round(frac * w) - 1, 0, 2, hh);
+  }
+
+  chartTip(e) {
+    const r = this.chart.getBoundingClientRect(), x = e.clientX - r.left, bins = this.bins || [];
+    const i = clamp(Math.floor((x / r.width) * bins.length), 0, bins.length - 1), b = bins[i];
+    if (!b) return;
+    const a0 = (i / bins.length) * this.data.total, a1 = ((i + 1) / bins.length) * this.data.total;
+    const span = this.data.real ? `${fmtTime(a0)}–${fmtTime(a1)}` : b.count ? `штрихи ${b.from + 1}–${b.to + 1}` : 'участок';
+    this.tip.textContent = `${span}: ${b.count} ${plural(b.count, 'штрих', 'штриха', 'штрихов')}`;
+    this.tip.style.left = clamp(x, 60, r.width - 60) + 'px';
+    this.tip.style.display = 'block';
+  }
+
+  /* ───── Воспроизведение ───── */
+
+  setSpeed(i, save = true) {
+    this.speedIdx = clamp(i, 0, SPEEDS.length - 1);
+    const s = SPEEDS[this.speedIdx];
+    this.speedLabel.textContent = 'x' + s;
+    this.speedFill.style.width = (this.speedIdx / (SPEEDS.length - 1)) * 100 + '%';
+    if (save) Settings.set('player', 'speed', s);
+  }
+
+  /* До x100 — плавная анимация по точкам штриха, выше — целые штрихи мгновенно */
+  advance(dt) {
+    const s = SPEEDS[this.speedIdx], d = this.data;
+    if (s > 100) {
+      this.acc = (this.acc || 0) + (dt * s) / 2;
+      const whole = Math.floor(this.acc);
+      if (whole) { this.acc -= whole; this.seek(Math.min(d.N, Math.floor(this.p) + whole)); }
+      return;
+    }
+    let budget = dt * s * 25, p = this.p;
+    while (budget > 0 && p < d.N) {
+      const i = Math.floor(p), n = d.pts[i] + 2, left = (i + 1 - p) * n;
+      if (budget >= left) { p = i + 1; budget -= left; } else { p += budget / n; budget = 0; }
+    }
+    this.seek(p);
   }
 
   play() {
-    if (this.t >= this.total) this.seekTo(0);
+    if (this.p >= this.data.N) this.seek(0);
     this.playing = true;
+    this.root.classList.remove('paused');
     this.playBtn.innerHTML = ICON.pause;
-    this.root?.classList.remove('paused');
     let last = performance.now();
     const step = now => {
       if (!this.playing) return;
-      const dt = (now - last) / 1000; last = now;
-      this.seekTo(this.t + dt * 60 * Settings.get('player', 'speed'));
-      if (this.t >= this.total) { this.pause(); this.emitEnd?.(); return; }
+      this.advance(Math.min(0.1, (now - last) / 1000)); last = now;
+      if (this.p >= this.data.N) { this.pause(); this.emitEnd?.(); return; }
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
   }
 
-  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; this.root?.classList.add('paused'); }
+  pause() { this.playing = false; cancelAnimationFrame(this.raf); this.playBtn.innerHTML = ICON.play; this.root.classList.add('paused'); }
   toggle() { this.playing ? this.pause() : this.play(); }
 
-  savePng() {
-    const c = h('canvas', { width: this.W, height: this.H });
+  /* ───── Меню и статистика ───── */
+
+  openPop(content) { this.pause(); this.pop.replaceChildren(content); this.pop.classList.add('open'); }
+  closePop() { this.pop.classList.remove('open'); }
+
+  showMenu() {
+    const item = (icon, label, fn) => h('button', { onclick: e => { e.stopPropagation(); this.closePop(); fn(); }, html: icon + `<span>${label}</span>` });
+    this.openPop(h('div', { class: 'gpp-tl-menu' },
+      item(TL_ICON.json, 'Сохранить процесс (.json)', () => this.saveProcess()),
+      item(ICON.image, 'Сохранить рисунок (PNG)', () => this.savePng()),
+      item(ICON.video, 'Записать видео (WebM)', () => this.record()),
+      item(TL_ICON.stats, 'Статистика', () => this.showStats())));
+  }
+
+  showStats() {
+    const d = this.data, { byTool, colors } = d.stats(), bins = this.bins || [];
+    const busiest = bins.reduce((m, b, i) => (b.count > m.c ? { c: b.count, i } : m), { c: 0, i: 0 });
+    const span = i => d.real ? `${fmtTime((i / bins.length) * d.total)}–${fmtTime(((i + 1) / bins.length) * d.total)}` : `${Math.round((i / bins.length) * 100)}–${Math.round(((i + 1) / bins.length) * 100)}% рисунка`;
+    const row = (a, b) => h('tr', {}, h('td', {}, a), h('td', {}, b));
+    this.openPop(h('div', { class: 'gpp-tl-stats gpp-scroll', onclick: e => e.stopPropagation() },
+      h('h4', {}, 'Статистика рисунка'),
+      h('table', {},
+        row('Всего штрихов', d.N),
+        d.real ? row('Время рисования', fmtTime(d.total)) : null,
+        d.real ? row('Штрихов в минуту', Math.round(d.N / Math.max(1 / 60, d.total / 60))) : null,
+        busiest.c ? row('Самый активный отрезок', `${span(busiest.i)}: ${busiest.c}`) : null,
+        ...[...byTool].sort((a, b) => b[1] - a[1]).map(([t, n]) => row(TOOL_STAT_NAMES[t] || 'Другое', n))),
+      h('div', { class: 'gpp-sec', style: { marginTop: '12px' } }, `Цветов: ${colors.length}`),
+      h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, colors.slice(0, 24).map(([c]) => h('span', { class: 'sw', title: c, style: { background: c } }))),
+      h('div', { class: 'gpp-note', style: { marginTop: '10px' } }, d.real
+        ? 'График над перемоткой — по реальному времени: высота столбика — сколько штрихов сделано за отрезок, цвет — основной цвет этих штрихов.'
+        : 'Игра не передаёт время штрихов, поэтому график — по ходу рисования: высота столбика — сколько штрихов на участке (много коротких — детализация), цвет — основной цвет. Для своих рисунков скрипт записывает реальное время.')));
+  }
+
+  renderFull(scale = 1) {
+    const c = h('canvas', { width: round(this.W * scale), height: round(this.H * scale) });
+    const lay = h('canvas', { width: c.width, height: c.height });
+    const lx = lay.getContext('2d');
+    lx.scale(scale, scale);
+    for (const v of this.strokes) renderStroke(lx, v);
     const x = c.getContext('2d');
-    x.fillStyle = '#fff'; x.fillRect(0, 0, this.W, this.H);
-    for (const v of this.strokes) renderStroke(x, v);
-    const tmp = h('canvas', { width: this.W, height: this.H });
-    const tx = tmp.getContext('2d');
-    tx.fillStyle = '#fff'; tx.fillRect(0, 0, this.W, this.H);
-    tx.drawImage(c, 0, 0);
-    tmp.toBlob(b => downloadBlob(b, 'gartic-drawing.png'));
+    x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(lay, 0, 0);
+    return c;
+  }
+
+  fileBase() { return (this.author || 'drawing').replace(/[^\wа-яё-]+/gi, '_'); }
+  savePng() { this.renderFull(2).toBlob(b => downloadBlob(b, `gartic-${this.fileBase()}.png`)); }
+
+  saveProcess() {
+    const data = { app: 'gartic-phone-plus', type: 'timelapse', version: 1, title: this.title, author: this.author, W: this.W, H: this.H, strokes: this.strokes, times: this.times };
+    downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), `gartic-process-${this.fileBase()}.json`);
   }
 
   record() {
     if (this.recorder) return this.recorder.stop();
     if (!window.MediaRecorder || !this.canvas.captureStream) return toast('Браузер не поддерживает запись видео');
     const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
-    const rec = new MediaRecorder(this.canvas.captureStream(30), { mimeType: mime, videoBitsPerSecond: 6e6 });
+    const rec = new MediaRecorder(this.canvas.captureStream(30), { mimeType: mime, videoBitsPerSecond: 8e6 });
     const chunks = [];
     rec.ondataavailable = e => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
-      this.recorder = null; this.recBtn.classList.remove('gpp-rec'); this.emitEnd = null;
-      if (chunks.length) downloadBlob(new Blob(chunks, { type: 'video/webm' }), 'gartic-timelapse.webm');
+      this.recorder = null; this.recBtn.classList.remove('gpp-tl-rec'); this.emitEnd = null;
+      if (chunks.length) downloadBlob(new Blob(chunks, { type: 'video/webm' }), `gartic-timelapse-${this.fileBase()}.webm`);
     };
     this.recorder = rec;
-    this.recBtn.classList.add('gpp-rec');
-    toast('Запись идёт до конца рисунка. Нажмите кнопку ещё раз, чтобы остановить.');
-    this.seekTo(0);
+    this.recBtn.classList.add('gpp-tl-rec');
+    toast('Запись идёт до конца рисунка. Нажмите кнопку записи ещё раз, чтобы остановить.');
+    this.seek(0);
     rec.start();
-    this.emitEnd = () => setTimeout(() => rec.state === 'recording' && rec.stop(), 600);
+    this.emitEnd = () => setTimeout(() => rec.state === 'recording' && rec.stop(), 700);
     this.play();
   }
 }
@@ -2617,6 +3279,7 @@ const Timelapse = new (class {
   init() {
     injectCss(PLAYER_CSS, 'gpp-player-css');
     this.current = null;
+    this.own = Store.get('tl.own', []);
     Net.on('album:item', () => this.decorateSoon());
     Net.on('screen', () => this.decorateSoon());
     new MutationObserver(() => this.decorateSoon()).observe(document.documentElement, { childList: true, subtree: true });
@@ -2625,28 +3288,49 @@ const Timelapse = new (class {
     document.addEventListener('mousedown', e => { if (e.button === 1 && this.findTarget(e.target)) e.preventDefault(); }, true);
   }
 
+  /* Реальное время своих штрихов: Painter передаёт его в конце хода, ключ — содержимое штрихов */
+  sig(strokes) {
+    const s = strokes.filter(Array.isArray).slice().sort((a, b) => a[1] - b[1]);
+    return s.length + '|' + JSON.stringify(s[0]?.slice(0, 9)) + '|' + JSON.stringify(s[s.length - 1]?.slice(0, 9));
+  }
+
+  rememberOwn(strokes, timing) {
+    if (!strokes.length) return;
+    const times = {};
+    for (const v of strokes) if (timing.has(v[1])) times[v[1]] = timing.get(v[1]);
+    this.own = [{ sig: this.sig(strokes), times }, ...this.own].slice(0, 12);
+    Store.set('tl.own', this.own);
+  }
+
+  timesFor(strokes) {
+    const rec = this.own.find(r => r.sig === this.sig(strokes));
+    if (!rec) return null;
+    const t = strokes.map(v => rec.times[v[1]]);
+    return t.every(Boolean) ? t : null;
+  }
+
   decorateSoon() {
     if (this.pending) return;
     this.pending = true;
     requestAnimationFrame(() => { this.pending = false; this.decorate(); });
   }
 
-  /* Возвращает { strokes, title, W, H, host } для элемента, по которому кликнули, или null.
+  /* Возвращает { strokes, title, W, H, host, author } для элемента, по которому кликнули, или null.
      host — область рисунка в карточке альбома, куда встраивается плеер. */
   findTarget(el) {
-    if (!el || el.closest?.('.gpp-win, .gpp-stage, .gpp-inline')) return null;
+    if (!el || el.closest?.('.gpp-win, .gpp-stage, .gpp-tl, .gpp-dock')) return null;
     const item = el.closest?.('.timeline .item');
     if (item) {
       const items = [...document.querySelectorAll('.timeline .item')];
-      const idx = items.indexOf(item);
-      const data = Net.album.items[idx];
+      const data = Net.album.items[items.indexOf(item)];
       if (!data || !Array.isArray(data.data)) return null;
       const cv = item.querySelector('canvas');
       const host = item.querySelector('.balloon .content') || cv?.parentElement || null;
-      return { strokes: data.data, title: `${data.user?.nick || ''} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848, host };
+      const author = data.user?.nick || '';
+      return { strokes: data.data, title: `${author} — ${Net.album.author?.nick ? 'альбом ' + Net.album.author.nick : 'альбом'}`, W: cv?.width || 1516, H: cv?.height || 848, host, author };
     }
     if (Net.state.screen === SCREEN.DESCRIPTION && el.tagName === 'CANVAS' && Array.isArray(Net.state.previous?.data)) {
-      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848, host: null };
+      return { strokes: Net.state.previous.data, title: 'Предыдущий рисунок', W: el.width || 1516, H: el.height || 848, host: null, author: Net.state.previous.user?.nick || '' };
     }
     return null;
   }
@@ -2658,10 +3342,18 @@ const Timelapse = new (class {
     this.open(t);
   }
 
-  open({ strokes, title, W, H, host }) {
+  open({ strokes, title, W, H, host, author, times }) {
     if (!strokes?.length) return toast('В этом рисунке нет штрихов');
     this.current?.close();
-    this.current = new Player(strokes, { title, W, H, host });
+    this.current = new Player(strokes, { title, W, H, host, author, times: times || this.timesFor(strokes) });
+  }
+
+  async openFile(file) {
+    try {
+      const d = JSON.parse(await file.text());
+      if (d.app !== 'gartic-phone-plus' || d.type !== 'timelapse' || !Array.isArray(d.strokes)) throw new Error('это не файл процесса GP+');
+      this.open({ strokes: d.strokes, title: d.title || file.name, W: d.W || 1516, H: d.H || 848, host: null, author: d.author, times: d.times });
+    } catch (e) { toast('Не удалось открыть процесс: ' + e.message, 4000); }
   }
 
   decorate() {
@@ -2672,7 +3364,8 @@ const Timelapse = new (class {
       const host = item.querySelector('.balloon') || item.querySelector('.drawingmode') || item;
       if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
       host.append(h('button', {
-        class: 'gpp-play-badge gpp', title: 'Таймлапс: как это рисовали (двойной клик по рисунку)', html: ICON.play + '<span>Таймлапс</span>',
+        class: 'gpp-play-badge gpp', title: `Таймлапс: ${data.data.length} ${plural(data.data.length, 'штрих', 'штриха', 'штрихов')} (двойной клик или средняя кнопка по рисунку)`,
+        html: ICON.play + '<span>Таймлапс</span>',
         onclick: e => { e.stopPropagation(); this.open(this.findTarget(item)); },
       }));
     });
@@ -2772,6 +3465,7 @@ const Menu = new (class {
         document.querySelector('.screen')?.classList.toggle('gpp-panels-hidden', !v);
       })),
       UI.row('Подтверждать «Готово»', 'Спрашивать перед завершением хода', B('readyConfirm', 'switch')),
+      UI.row('Подтверждать очистку холста', null, B('clearConfirm', 'switch')),
       UI.row('Курсор-кисть', 'Показывать размер кисти вместо обычного курсора', B('showCursor', 'switch')),
       UI.sec('В начале каждого хода'),
       UI.row('Сбрасывать кисть', 'Ставить цвета, толщину и насыщенность по умолчанию', B('resetEachTurn', 'switch')),
@@ -2800,30 +3494,40 @@ const Menu = new (class {
   }
 
   keysTab() {
+    const GPMOD = { mirror: ['CapsLock'], mirrorY: ['Shift+CapsLock'], gray: ['KeyB'], brush: [], clear: ['KeyF'] };
     return h('div', {},
       h('div', { class: 'gpp-note' }, 'Клавиши работают во время своего хода рисования. ЛКМ по клавише — переназначить, ПКМ — удалить, «+» — добавить ещё одно сочетание. Esc — отменить запись.'),
+      h('div', { class: 'gpp-btns', style: { marginBottom: '10px' } },
+        h('button', { class: 'gpp-btn', onclick: () => { Hotkeys.resetAll(); this.show(this.current); toast('Раскладка GP+'); } }, 'Раскладка GP+'),
+        h('button', { class: 'gpp-btn primary', title: 'Зеркало — CapsLock, Ч/Б — B, очистка — F, как в gpmod', onclick: () => { Store.set('hotkeys', GPMOD); Hotkeys.emit('changed'); this.show(this.current); toast('Раскладка как в gpmod'); } }, 'Как в gpmod')),
       Hotkeys.view());
   }
 
   refTab() {
     return h('div', {},
-      UI.sec('Окно референсов'),
-      h('div', { class: 'gpp-note' }, 'Поиск картинок прямо в игре и плавающие окна с референсами поверх холста. Открыть: клавиша P во время рисования или кнопка ниже.'),
-      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => { this.modal.close(); Reference.open(); } }, 'Открыть референсы')),
-      UI.sec('Окна с картинками'),
-      UI.row('Прозрачность по умолчанию', null, UI.bind('reference', 'frameOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
-      h('div', { class: 'gpp-note' }, 'В окне картинки: колесо — масштаб, перетаскивание — сдвиг, двойной клик — вписать. Кнопка-булавка делает окно «прозрачным для мыши»: можно рисовать сквозь него.'),
+      UI.sec('Боковая панель референсов'),
+      h('div', { class: 'gpp-note' }, 'Панель открывается слева от игры, игра сдвигается вправо. Ширину меняйте, перетаскивая правую границу панели (двойной клик по границе — минимум/максимум). Открыть: клавиша P во время рисования, кнопка с картинкой в шапке или кнопка ниже.'),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => { this.modal.close(); Reference.open(); } }, 'Открыть панель')),
+      h('div', { class: 'gpp-note' }, 'В просмотре: колесо — масштаб, ЛКМ — двигать, двойной клик или средняя кнопка — вписать, ПКМ — назад к результатам, Ctrl+клик — сохранить. В строку поиска можно вставить ссылку на картинку.'),
+      UI.sec('Плавающие окна'),
+      h('div', { class: 'gpp-note' }, 'Кнопка-булавка в просмотре открепляет картинку в окно поверх игры. В окне: прозрачность, отражение, Ч/Б, закрепление (клики проходят сквозь картинку).'),
+      UI.row('Прозрачность окон по умолчанию', null, UI.bind('reference', 'frameOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
       h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn danger', onclick: () => { [...Reference.frames].forEach(f => f.win.hide()); toast('Окна референсов закрыты'); } }, 'Закрыть все окна')),
     );
   }
 
   playerTab() {
+    const file = h('input', { type: 'file', accept: '.json', style: { display: 'none' } });
+    file.addEventListener('change', () => { if (file.files[0]) { this.modal.close(); Timelapse.openFile(file.files[0]); } file.value = ''; });
     return h('div', {},
       UI.sec('Плеер процесса рисования'),
-      h('div', { class: 'gpp-note' }, 'В альбоме на каждом рисунке появляется кнопка ▶. Также работает двойной клик или средняя кнопка мыши по рисунку. Плеер умеет сохранять PNG и записывать видео WebM.'),
+      h('div', { class: 'gpp-note' }, 'В альбоме на каждом рисунке есть кнопка «Таймлапс»; также работает двойной клик или средняя кнопка мыши по рисунку. Плеер открывается прямо на месте рисунка.'),
+      h('div', { class: 'gpp-note' }, 'Управление: клик по рисунку — пуск/пауза, средняя кнопка — развернуть на весь интерфейс игры, двойной клик или F — полный экран без рамок, ПКМ — меню сохранения (процесс .json, PNG, видео). Скорость — зажать и вести по индикатору «x10» или колесо. До x100 штрихи рисуются плавно, выше — мгновенно.'),
+      h('div', { class: 'gpp-note' }, 'Над перемоткой — график: сколько штрихов сделано на каждом участке, цвет — основной цвет штрихов. Для своих рисунков график по реальному времени (скрипт записывает время штрихов), для чужих — по ходу рисования, потому что игра время не передаёт.'),
       UI.row('Автовоспроизведение', 'Запускать сразу после открытия', UI.bind('player', 'autoplay', 'switch')),
       UI.row('Открывать двойным кликом', null, UI.bind('player', 'openOnDblClick', 'switch')),
-      UI.row('Скорость по умолчанию', null, UI.bind('player', 'speed', 'select', { items: [[0.5, '×0.5'], [1, '×1'], [2, '×2'], [4, '×4'], [8, '×8']] })),
+      UI.sec('Сохранённые процессы'),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => file.click() }, 'Открыть процесс (.json)'), file),
     );
   }
 
@@ -2842,6 +3546,9 @@ const Menu = new (class {
       UI.sec('Оформление'),
       UI.row('Акцентный цвет', null, UI.color(Settings.get('ui', 'accent'), v => { Settings.set('ui', 'accent', v); applyTheme(); })),
       UI.row('Непрозрачность панелей', null, UI.slider(Settings.get('ui', 'panelOpacity'), { min: 0.6, max: 1, step: 0.02 }, v => { Settings.set('ui', 'panelOpacity', v); applyTheme(); })),
+      UI.sec('Размер интерфейса игры'),
+      UI.row('Фиксированный размер', 'Игра не меняет размер вместе с окном браузера — удобно рисовать с референса на одном мониторе', UI.bind('ui', 'fixedSize', 'switch')),
+      UI.row('Масштаб', null, UI.bind('ui', 'fixedScale', 'slider', { min: 0.5, max: 1.5, step: 0.05, fmt: v => Math.round(v * 100) + '%' })),
       UI.sec('Настройки'),
       h('div', { class: 'gpp-note' }, 'Файл содержит все настройки, клавиши и ваши палитры.'),
       h('div', { class: 'gpp-btns' },
@@ -2852,7 +3559,7 @@ const Menu = new (class {
           Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.show(this.current); toast('Сброшено');
         } }, 'Сбросить всё')),
       UI.sec('О скрипте'),
-      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.1. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
+      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.2. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
       h('div', { class: 'gpp-note' }, 'Состояние: ' + (Net.connected ? 'подключено к игре' : 'ожидание подключения к комнате')),
     );
   }
@@ -2868,13 +3575,14 @@ onReady(() => {
   injectCss(CSS, 'gpp-css');
   applyTheme();
   Layer.init();
+  Layout.init();
   Painter.init();
   Reference.init();
   Timelapse.init();
   Menu.init();
   if (Net.state.screen === SCREEN.DRAW) Painter.scheduleAttach();
   if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse, Menu };
-  console.log('[GP+] Gartic Phone Plus 1.1 загружен');
+  console.log('[GP+] Gartic Phone Plus 1.2 загружен');
 });
 
 })();

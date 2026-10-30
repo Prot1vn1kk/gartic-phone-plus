@@ -92,6 +92,7 @@ const Menu = new (class {
         document.querySelector('.screen')?.classList.toggle('gpp-panels-hidden', !v);
       })),
       UI.row('Подтверждать «Готово»', 'Спрашивать перед завершением хода', B('readyConfirm', 'switch')),
+      UI.row('Подтверждать очистку холста', null, B('clearConfirm', 'switch')),
       UI.row('Курсор-кисть', 'Показывать размер кисти вместо обычного курсора', B('showCursor', 'switch')),
       UI.sec('В начале каждого хода'),
       UI.row('Сбрасывать кисть', 'Ставить цвета, толщину и насыщенность по умолчанию', B('resetEachTurn', 'switch')),
@@ -120,30 +121,40 @@ const Menu = new (class {
   }
 
   keysTab() {
+    const GPMOD = { mirror: ['CapsLock'], mirrorY: ['Shift+CapsLock'], gray: ['KeyB'], brush: [], clear: ['KeyF'] };
     return h('div', {},
       h('div', { class: 'gpp-note' }, 'Клавиши работают во время своего хода рисования. ЛКМ по клавише — переназначить, ПКМ — удалить, «+» — добавить ещё одно сочетание. Esc — отменить запись.'),
+      h('div', { class: 'gpp-btns', style: { marginBottom: '10px' } },
+        h('button', { class: 'gpp-btn', onclick: () => { Hotkeys.resetAll(); this.show(this.current); toast('Раскладка GP+'); } }, 'Раскладка GP+'),
+        h('button', { class: 'gpp-btn primary', title: 'Зеркало — CapsLock, Ч/Б — B, очистка — F, как в gpmod', onclick: () => { Store.set('hotkeys', GPMOD); Hotkeys.emit('changed'); this.show(this.current); toast('Раскладка как в gpmod'); } }, 'Как в gpmod')),
       Hotkeys.view());
   }
 
   refTab() {
     return h('div', {},
-      UI.sec('Окно референсов'),
-      h('div', { class: 'gpp-note' }, 'Поиск картинок прямо в игре и плавающие окна с референсами поверх холста. Открыть: клавиша P во время рисования или кнопка ниже.'),
-      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => { this.modal.close(); Reference.open(); } }, 'Открыть референсы')),
-      UI.sec('Окна с картинками'),
-      UI.row('Прозрачность по умолчанию', null, UI.bind('reference', 'frameOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
-      h('div', { class: 'gpp-note' }, 'В окне картинки: колесо — масштаб, перетаскивание — сдвиг, двойной клик — вписать. Кнопка-булавка делает окно «прозрачным для мыши»: можно рисовать сквозь него.'),
+      UI.sec('Боковая панель референсов'),
+      h('div', { class: 'gpp-note' }, 'Панель открывается слева от игры, игра сдвигается вправо. Ширину меняйте, перетаскивая правую границу панели (двойной клик по границе — минимум/максимум). Открыть: клавиша P во время рисования, кнопка с картинкой в шапке или кнопка ниже.'),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => { this.modal.close(); Reference.open(); } }, 'Открыть панель')),
+      h('div', { class: 'gpp-note' }, 'В просмотре: колесо — масштаб, ЛКМ — двигать, двойной клик или средняя кнопка — вписать, ПКМ — назад к результатам, Ctrl+клик — сохранить. В строку поиска можно вставить ссылку на картинку.'),
+      UI.sec('Плавающие окна'),
+      h('div', { class: 'gpp-note' }, 'Кнопка-булавка в просмотре открепляет картинку в окно поверх игры. В окне: прозрачность, отражение, Ч/Б, закрепление (клики проходят сквозь картинку).'),
+      UI.row('Прозрачность окон по умолчанию', null, UI.bind('reference', 'frameOpacity', 'slider', { min: 0.1, max: 1, step: 0.05 })),
       h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn danger', onclick: () => { [...Reference.frames].forEach(f => f.win.hide()); toast('Окна референсов закрыты'); } }, 'Закрыть все окна')),
     );
   }
 
   playerTab() {
+    const file = h('input', { type: 'file', accept: '.json', style: { display: 'none' } });
+    file.addEventListener('change', () => { if (file.files[0]) { this.modal.close(); Timelapse.openFile(file.files[0]); } file.value = ''; });
     return h('div', {},
       UI.sec('Плеер процесса рисования'),
-      h('div', { class: 'gpp-note' }, 'В альбоме на каждом рисунке появляется кнопка ▶. Также работает двойной клик или средняя кнопка мыши по рисунку. Плеер умеет сохранять PNG и записывать видео WebM.'),
+      h('div', { class: 'gpp-note' }, 'В альбоме на каждом рисунке есть кнопка «Таймлапс»; также работает двойной клик или средняя кнопка мыши по рисунку. Плеер открывается прямо на месте рисунка.'),
+      h('div', { class: 'gpp-note' }, 'Управление: клик по рисунку — пуск/пауза, средняя кнопка — развернуть на весь интерфейс игры, двойной клик или F — полный экран без рамок, ПКМ — меню сохранения (процесс .json, PNG, видео). Скорость — зажать и вести по индикатору «x10» или колесо. До x100 штрихи рисуются плавно, выше — мгновенно.'),
+      h('div', { class: 'gpp-note' }, 'Над перемоткой — график: сколько штрихов сделано на каждом участке, цвет — основной цвет штрихов. Для своих рисунков график по реальному времени (скрипт записывает время штрихов), для чужих — по ходу рисования, потому что игра время не передаёт.'),
       UI.row('Автовоспроизведение', 'Запускать сразу после открытия', UI.bind('player', 'autoplay', 'switch')),
       UI.row('Открывать двойным кликом', null, UI.bind('player', 'openOnDblClick', 'switch')),
-      UI.row('Скорость по умолчанию', null, UI.bind('player', 'speed', 'select', { items: [[0.5, '×0.5'], [1, '×1'], [2, '×2'], [4, '×4'], [8, '×8']] })),
+      UI.sec('Сохранённые процессы'),
+      h('div', { class: 'gpp-btns' }, h('button', { class: 'gpp-btn primary', onclick: () => file.click() }, 'Открыть процесс (.json)'), file),
     );
   }
 
@@ -162,6 +173,9 @@ const Menu = new (class {
       UI.sec('Оформление'),
       UI.row('Акцентный цвет', null, UI.color(Settings.get('ui', 'accent'), v => { Settings.set('ui', 'accent', v); applyTheme(); })),
       UI.row('Непрозрачность панелей', null, UI.slider(Settings.get('ui', 'panelOpacity'), { min: 0.6, max: 1, step: 0.02 }, v => { Settings.set('ui', 'panelOpacity', v); applyTheme(); })),
+      UI.sec('Размер интерфейса игры'),
+      UI.row('Фиксированный размер', 'Игра не меняет размер вместе с окном браузера — удобно рисовать с референса на одном мониторе', UI.bind('ui', 'fixedSize', 'switch')),
+      UI.row('Масштаб', null, UI.bind('ui', 'fixedScale', 'slider', { min: 0.5, max: 1.5, step: 0.05, fmt: v => Math.round(v * 100) + '%' })),
       UI.sec('Настройки'),
       h('div', { class: 'gpp-note' }, 'Файл содержит все настройки, клавиши и ваши палитры.'),
       h('div', { class: 'gpp-btns' },
@@ -172,7 +186,7 @@ const Menu = new (class {
           Object.keys(DEFAULTS).forEach(k => Settings.reset(k)); Hotkeys.resetAll(); applyTheme(); this.show(this.current); toast('Сброшено');
         } }, 'Сбросить всё')),
       UI.sec('О скрипте'),
-      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.1. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
+      h('div', { class: 'gpp-note' }, 'Gartic Phone Plus 1.2. Весь код находится внутри этого файла: скрипт не подгружает внешний код, не собирает аналитику и не отправляет ваши данные на сторонние серверы. Сеть используется только для поиска референсов по вашему запросу.'),
       h('div', { class: 'gpp-note' }, 'Состояние: ' + (Net.connected ? 'подключено к игре' : 'ожидание подключения к комнате')),
     );
   }
@@ -188,13 +202,14 @@ onReady(() => {
   injectCss(CSS, 'gpp-css');
   applyTheme();
   Layer.init();
+  Layout.init();
   Painter.init();
   Reference.init();
   Timelapse.init();
   Menu.init();
   if (Net.state.screen === SCREEN.DRAW) Painter.scheduleAttach();
   if (W.__gpPlusDebug) W.__gpPlus = { Net, Painter, Hotkeys, Settings, Reference, Timelapse, Menu };
-  console.log('[GP+] Gartic Phone Plus 1.1 загружен');
+  console.log('[GP+] Gartic Phone Plus 1.2 загружен');
 });
 
 })();

@@ -1,7 +1,7 @@
 // node test/fill.test.js — проверка упаковки заливки (связность k-ссылок, покрытие, отсутствие пересечений)
 const fs = require('fs');
 const path = require('path');
-const src = fs.readFileSync(path.join(__dirname, '../src/03-painter.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '../src/03-painter.js'), 'utf8').replace(/\r\n/g, '\n');
 const grab = name => src.slice(src.indexOf('function ' + name), src.indexOf('\n}\n', src.indexOf('function ' + name)) + 2);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v)), round = Math.round;
 eval(grab('floodRects') + grab('orderRects'));

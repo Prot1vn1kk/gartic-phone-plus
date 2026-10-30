@@ -367,6 +367,7 @@ const Painter = new (class extends Emitter {
     for (const c of this.gameCanvases) c.style.visibility = 'hidden';
 
     this.history = []; this.redoStack = []; this.current = null;
+    this.timing = new Map();
     this.nextId = 1;
     for (const s of Net.state.draw || []) if (Array.isArray(s) && s[1] >= this.nextId) this.nextId = s[1] + 1;
     this.view = { ...this.view, zoom: 1, rot: 0, panX: 0, panY: 0 };
@@ -393,6 +394,9 @@ const Painter = new (class extends Emitter {
     this.resize();
     this.syncGameUi();
     this.ui.mount();
+    // после анимации появления экрана и при изменении раскладки пересчитать размер холста
+    this.resizeTimer = setTimeout(() => this.resize(), 800);
+    this.offLayout = Layout.on('change', () => setTimeout(() => this.resize(), 50));
     this.emit('attach');
   }
 
@@ -401,6 +405,8 @@ const Painter = new (class extends Emitter {
     if (!this.active) return;
     this.active = false;
     this.cancelStroke();
+    if (this.history.length) Timelapse.rememberOwn(this.history.flatMap(g => g.strokes), this.timing);
+    clearTimeout(this.resizeTimer); this.offLayout?.();
     this.ro?.disconnect(); this.guard?.disconnect();
     this.unbind?.forEach(f => f());
     this.unbind = [];
@@ -427,11 +433,14 @@ const Painter = new (class extends Emitter {
 
   resize() {
     if (!this.stage) return;
-    // offsetWidth не зависит от CSS-трансформаций (у экрана игры есть анимация появления со scale)
+    // Координаты считаются в пикселях макета (offsetWidth не зависит от transform экрана игры),
+    // а сам холст — в реальных пикселях экрана с учётом масштаба игры: так картинка не размывается.
     this.dpr = window.devicePixelRatio || 1;
     this.cw = this.stage.offsetWidth; this.ch = this.stage.offsetHeight;
-    this.viewCanvas.width = Math.max(1, round(this.cw * this.dpr));
-    this.viewCanvas.height = Math.max(1, round(this.ch * this.dpr));
+    const r = this.stage.getBoundingClientRect();
+    this.pxk = this.dpr * (r.width && this.cw ? r.width / this.cw : 1);
+    this.viewCanvas.width = Math.max(1, round(this.cw * this.pxk));
+    this.viewCanvas.height = Math.max(1, round(this.ch * this.pxk));
     this.render();
   }
 
@@ -490,11 +499,11 @@ const Painter = new (class extends Emitter {
 
   draw() {
     if (!this.active) return;
-    const c = this.vctx, dpr = this.dpr;
+    const c = this.vctx, k = this.pxk;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.viewCanvas.width, this.viewCanvas.height);
     const m = this.matrix();
-    c.setTransform(new DOMMatrix([dpr, 0, 0, dpr, 0, 0]).multiply(m));
+    c.setTransform(new DOMMatrix([k, 0, 0, k, 0, 0]).multiply(m));
     c.imageSmoothingEnabled = this.view.zoom < 2;
     c.fillStyle = '#fff';
     c.fillRect(0, 0, this.W, this.H);
@@ -716,7 +725,7 @@ const Painter = new (class extends Emitter {
     const ip = [round(p[0]), round(p[1])];
     if (tool === TOOL.FILL) return this.fillAt(ip, color);
     const style = [color, this.thickness, this.opacity];
-    this.current = { tool, style, raw: [ip], smooth: [ip], start: ip, end: ip, strokes: [], ids: [] };
+    this.current = { tool, style, raw: [ip], smooth: [ip], start: ip, end: ip, strokes: [], ids: [], t0: Date.now() };
     const transforms = this.sym.on ? symmetryTransforms(this.sym.mode, this.symCount(), this.W / 2, this.H / 2) : [];
     this.current.transforms = [{ f: q => q, rigid: true }, ...transforms];
     if (SHAPE_TOOLS.has(tool) && (this.sym.mode === SYM.RADIAL || this.sym.mode === SYM.MANDALA))
@@ -791,18 +800,20 @@ const Painter = new (class extends Emitter {
       if (cur.start[0] === cur.end[0] && cur.start[1] === cur.end[1]) { this.render(); return; }
       cur.strokes.forEach(v => Net.tool(1, v));
     }
-    this.commit({ ids: cur.ids, strokes: cur.strokes });
+    this.commit({ ids: cur.ids, strokes: cur.strokes, t0: cur.t0 });
   }
 
   cancelStroke() {
     if (!this.current) return;
     const cur = this.current;
     this.current = null;
-    if (cur.tool === TOOL.PEN || cur.tool === TOOL.ERASER) this.commit({ ids: cur.ids, strokes: cur.strokes });
+    if (cur.tool === TOOL.PEN || cur.tool === TOOL.ERASER) this.commit({ ids: cur.ids, strokes: cur.strokes, t0: cur.t0 });
     this.render();
   }
 
   commit(group) {
+    const t1 = Date.now();
+    for (const id of group.ids) if (!this.timing.has(id)) this.timing.set(id, [group.t0 || t1, t1]);
     this.history.push(group);
     this.redoStack = [];
     for (const v of group.strokes) renderStroke(this.docCtx, v);
@@ -838,7 +849,7 @@ const Painter = new (class extends Emitter {
 
   async clearAll() {
     if (!this.history.length) return;
-    if (!(await confirmDialog('Очистить холст?', 'Все ваши штрихи этого хода будут отменены. Вернуть их будет нельзя.', 'Очистить'))) return;
+    if (Settings.get('painter', 'clearConfirm') && !(await confirmDialog('Очистить холст?', 'Все ваши штрихи этого хода будут отменены. Вернуть их будет нельзя.', 'Очистить'))) return;
     for (const g of [...this.history].reverse()) g.ids.forEach(id => Net.tool(2, id));
     this.history = []; this.redoStack = [];
     this.rebuildDoc();
@@ -1100,12 +1111,22 @@ background:var(--gpp-edge);color:#fff;font:11px/1 var(--gpp-f-bold);padding:6px 
 .gpp-palbar button{width:20px;height:20px;border:0;border-radius:5px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
 .gpp-palbar button:hover{background:rgba(255,255,255,.3)}
 .gpp-palbar svg{width:13px;height:13px}
-.gpp-swgrid{display:grid;grid-template-columns:repeat(5,18px);justify-content:space-between;gap:5px 0;max-height:118px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
+.gpp-left{width:154px}
+.gpp-spectrum{display:grid;grid-template-columns:repeat(13,1fr);border-radius:6px;overflow:hidden;box-shadow:0 0 0 1.6px rgba(255,255,255,.75)}
+.gpp-spectrum i{display:block;aspect-ratio:1;cursor:pointer}
+.gpp-spectrum i:hover{outline:2px solid #fff;outline-offset:-1px;position:relative;z-index:1}
+.gpp-spectrum i.sel{outline:2px solid var(--gpp-accent);outline-offset:-1px;position:relative;z-index:2}
+.gpp-big{position:relative;height:30px;border-radius:7px;display:flex;overflow:hidden;box-shadow:0 0 0 1.6px #fff,0 0 0 3.4px rgb(67,17,31);margin:2px}
+.gpp-big .p{flex:1}.gpp-big .s{width:32%;cursor:pointer;box-shadow:inset 2px 0 0 rgba(255,255,255,.8)}
+.gpp-big input{position:absolute;left:5px;top:50%;transform:translateY(-50%);width:70px;background:rgba(0,0,0,.38);border:0;border-radius:5px;color:#fff;font:11px var(--gpp-f-bold);padding:3px 5px;text-transform:uppercase;outline:none}
+.gpp-big input:focus{background:rgba(0,0,0,.6)}
+.gpp-rangebox span{width:36px;font:10.5px var(--gpp-f-bold);opacity:.85}
+.gpp-swgrid{display:grid;grid-template-columns:repeat(6,20px);justify-content:space-between;gap:4px 0;max-height:142px;overflow-y:auto;padding:2px 2px 2px 1px;margin:0 -2px 0 -1px}
 .gpp-swgrid::-webkit-scrollbar{width:4px}.gpp-swgrid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.4);border-radius:4px}
-.gpp-col .gpp-sw{width:18px;height:18px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
+.gpp-col .gpp-sw{width:20px;height:20px;border-radius:4px;border:1px solid rgb(67,17,31);box-shadow:0 0 0 1.5px #fff;cursor:pointer}
 .gpp-col .gpp-sw:hover{transform:scale(1.12)}
 .gpp-col .gpp-sw.sel{box-shadow:0 0 0 2.5px var(--gpp-accent)}
-.gpp-recent{grid-template-columns:repeat(5,18px);max-height:none}
+.gpp-recent{grid-template-columns:repeat(6,20px);max-height:none}
 .gpp-hdr{position:absolute;left:56px;top:10px;display:flex;gap:4px;z-index:6}
 .gpp-hbtn{width:32px;height:30px;border:0;background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;border-radius:7px}
 .gpp-hbtn:hover{background:rgba(255,255,255,.14)}
@@ -1121,7 +1142,7 @@ class GameUI {
   constructor(p) {
     this.p = p;
     this.palettes = Store.get('palettes', null) || { 'Мои цвета': [] };
-    this.palName = Store.get('palette.current', 'Gartic');
+    this.palName = Store.get('palette.current', 'Спектр');
     this.gamePalette = [];
     injectCss(GAMEUI_CSS, 'gpp-gameui-css');
   }
@@ -1204,35 +1225,62 @@ class GameUI {
 
   buildLeft() {
     const p = this.p;
-    this.c1 = h('span', { class: 'c1' }); this.c2 = h('span', { class: 'c2' });
-    this.hex = h('input', { class: 'gpp-hex', maxlength: 7, spellcheck: 'false', title: 'HEX-код цвета' });
+    this.hex = h('input', { maxlength: 7, spellcheck: 'false', title: 'HEX-код основного цвета' });
     this.hex.addEventListener('change', () => p.setColor(this.hex.value.startsWith('#') ? this.hex.value : '#' + this.hex.value));
-    this.cp = new ColorPicker({ width: 111, height: 78 });
+    this.hex.addEventListener('click', e => e.stopPropagation());
+    this.bigP = h('div', { class: 'p', title: 'Основной цвет (ЛКМ)' });
+    this.bigS = h('div', { class: 's', title: 'Дополнительный цвет (ПКМ рисует им). Клик — поменять местами (X)', onclick: () => p.swapColors() });
+    this.cp = new ColorPicker({ width: 136, height: 92 });
     this.cp.on('input', hex => p.setColor(hex, false));
     this.cp.on('commit', hex => p.pushRecent(hex));
-    this.size = h('input', { type: 'range', min: 1, step: 1, title: 'Толщина кисти' });
-    this.size.addEventListener('input', () => p.setThickness(+this.size.value));
-    this.sizeVal = h('b');
+    const range = (title, min, get, set) => {
+      const inp = h('input', { type: 'range', min, step: 1, title });
+      const val = h('b');
+      inp.addEventListener('input', () => set(+inp.value));
+      const box = h('div', { class: 'gpp-rangebox', title }, h('span', {}, title.split(' ')[0]), inp, val);
+      box.upd = max => { inp.max = max; inp.value = get(); val.textContent = get(); };
+      return box;
+    };
+    this.size = range('Толщина кисти ([ и ], Ctrl+тянуть)', 1, () => p.thickness, v => p.setThickness(v));
+    this.opac = range('Насыщенность кисти (, и ., Shift+тянуть)', 1, () => p.opacity, v => p.setOpacity(v));
     this.palSel = h('select', { title: 'Палитра' });
     this.palSel.addEventListener('change', () => { this.palName = this.palSel.value; Store.set('palette.current', this.palName); this.refresh(); });
     const file = h('input', { type: 'file', accept: '.aco,.gpl,.txt,.hex', style: { display: 'none' } });
     file.addEventListener('change', () => this.importPalette(file.files[0]).finally(() => (file.value = '')));
+    this.spectrum = this.buildSpectrum();
     this.palGrid = h('div', { class: 'gpp-swgrid' });
-    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent' });
+    this.recentGrid = h('div', { class: 'gpp-swgrid gpp-recent', title: 'Последние цвета' });
     return this.stop(h('div', { class: 'gpp-col gpp-left gpp' },
-      h('div', { class: 'gpp-colhead' },
-        h('div', { class: 'gpp-pair', title: 'Основной / дополнительный цвет (ПКМ рисует дополнительным). Клик — поменять (X)', onclick: () => p.swapColors() }, this.c1, this.c2),
-        this.hex),
-      this.cp.el,
-      h('div', { class: 'gpp-rangebox', title: 'Толщина кисти ([ и ])' }, this.size, this.sizeVal),
-      h('div', { class: 'gpp-sep' }),
       h('div', { class: 'gpp-palbar' }, this.palSel,
         h('button', { title: 'Добавить текущий цвет в «Мои цвета»', html: ICON.plus, onclick: () => this.addToMine() }),
         h('button', { title: 'Импорт палитры (.aco, .gpl, .txt)', html: ICON.download, style: { transform: 'rotate(180deg)' }, onclick: () => file.click() }),
         file),
-      this.palGrid,
-      h('div', { class: 'gpp-sep' }),
+      this.spectrum, this.palGrid,
+      this.cp.el,
+      h('div', { class: 'gpp-big' }, this.bigP, this.bigS, this.hex),
+      this.size, this.opac,
       this.recentGrid));
+  }
+
+  /* Спектр как в gpmod: столбцы — оттенки, строки — светлота; последний столбец серый, нижняя строка — тона кожи */
+  buildSpectrum() {
+    const hsl = (hh, s, l) => {
+      const a = s * Math.min(l, 1 - l), f = n => { const k = (n + hh / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+      return Color.rgbToHex(f(0) * 255, f(8) * 255, f(4) * 255);
+    };
+    const colors = [];
+    for (let r = 0; r < 10; r++) {
+      const l = 0.9 - r * 0.084;
+      for (let c = 0; c < 12; c++) colors.push(hsl(c * 30, r < 1 ? 0.75 : 0.88, l));
+      colors.push(hsl(0, 0, r === 0 ? 1 : r === 9 ? 0 : 1 - r / 9));
+    }
+    colors.push('#ffe8d6', '#ffd5b8', '#f5c19e', '#e8a87c', '#d4915f', '#bf7a4a', '#a0613a', '#82492b', '#66361f', '#4a2616', '#f2d7c9', '#c99d84', '#2e1a10');
+    this.spectrumColors = colors;
+    const el = h('div', { class: 'gpp-spectrum', title: 'ЛКМ — основной цвет, ПКМ — дополнительный' });
+    colors.forEach(c => el.append(h('i', { style: { background: c }, dataset: { c } })));
+    el.addEventListener('click', e => { const c = e.target.dataset?.c; if (c) this.p.setColor(c); });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); const c = e.target.dataset?.c; if (c) { this.p.color2 = c; this.refresh(); } });
+    return el;
   }
 
   buildRight() {
@@ -1272,7 +1320,7 @@ class GameUI {
   }
 
   allPalettes() {
-    return { Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
+    return { 'Спектр': this.spectrumColors || [], Gartic: this.gamePalette.length ? this.gamePalette : BUILTIN_PALETTES['Базовая'], ...BUILTIN_PALETTES, 'Гармония': this.harmony(), ...this.palettes };
   }
 
   harmony() {
@@ -1318,20 +1366,26 @@ class GameUI {
   refresh() {
     const p = this.p;
     if (!this.mounted) return;
-    this.c1.style.background = p.color;
-    this.c2.style.background = p.color2;
+    this.bigP.style.background = p.color;
+    this.bigS.style.background = p.color2;
     if (document.activeElement !== this.hex) this.hex.value = p.color;
+    this.hex.style.color = Color.hexToHsv(p.color)[2] > 0.6 && Color.hexToHsv(p.color)[1] < 0.5 ? '#000' : '#fff';
     if (!this.cp.dragging) this.cp.set(p.color);
-    this.size.max = Settings.get('painter', 'maxThickness');
-    this.size.value = p.thickness;
-    this.sizeVal.textContent = p.thickness;
+    this.size.upd(Settings.get('painter', 'maxThickness'));
+    this.opac.upd(10);
     const all = this.allPalettes();
-    if (!all[this.palName]) this.palName = 'Gartic';
+    if (!all[this.palName]) this.palName = 'Спектр';
     this.palSel.replaceChildren(...Object.keys(all).map(n => h('option', { value: n, selected: n === this.palName }, n)));
-    const removable = !!this.palettes[this.palName];
-    this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
-    if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
-    this.recentGrid.replaceChildren(...p.recent.slice(0, 10).map(c => this.swatch(c)));
+    const isSpectrum = this.palName === 'Спектр';
+    this.spectrum.style.display = isSpectrum ? '' : 'none';
+    this.palGrid.style.display = isSpectrum ? 'none' : '';
+    if (isSpectrum) this.spectrum.querySelectorAll('i').forEach(i => i.classList.toggle('sel', i.dataset.c === p.color));
+    else {
+      const removable = !!this.palettes[this.palName];
+      this.palGrid.replaceChildren(...all[this.palName].map(c => this.swatch(c, removable)));
+      if (!all[this.palName].length) this.palGrid.append(h('div', { style: { gridColumn: '1 / -1', opacity: 0.75 } }, 'Пусто: «+» добавит текущий цвет'));
+    }
+    this.recentGrid.replaceChildren(...p.recent.slice(0, 12).map(c => this.swatch(c)));
     this.recentGrid.style.display = p.recent.length ? '' : 'none';
     if (this.right) {
       this.symGrid.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', p.sym.on && b.dataset.mode === p.sym.mode));

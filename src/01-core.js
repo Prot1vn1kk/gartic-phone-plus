@@ -136,11 +136,13 @@ const DEFAULTS = {
     radialCount: 8,
     mandalaCount: 4,
     readyConfirm: false,
+    clearConfirm: true,
     hideHeader: false,
     showCursor: true,
   },
   reference: {
-    engine: 'google',
+    dockWidth: 360,
+    engine: 'commons',
     googleSafe: 'active',
     frameOpacity: 1,
     stickyEdges: true,
@@ -148,11 +150,13 @@ const DEFAULTS = {
   player: {
     autoplay: true,
     openOnDblClick: true,
-    speed: 1,
+    speed: 10,
   },
   ui: {
     accent: '#5bffb6',
     panelOpacity: 1,
+    fixedSize: false,
+    fixedScale: 1,
   },
 };
 

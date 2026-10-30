@@ -424,3 +424,53 @@ const Hotkeys = new (class extends Emitter {
     return box;
   }
 })();
+
+/* ───────────────────────────── Раскладка экрана игры ─────────────────────────────
+   Игра центрирует .screen и масштабирует его от размера окна. Когда открыта боковая панель
+   референсов или включён фиксированный размер, масштаб и сдвиг считает скрипт.             */
+
+const Layout = new (class extends Emitter {
+  constructor() { super(); this.dock = 0; }
+
+  init() {
+    injectCss('html.gpp-layout .screen{transform:scale(var(--gpp-scr-scale,1)) !important}', 'gpp-layout-css');
+    window.addEventListener('resize', () => this.applySoon());
+    new MutationObserver(() => { if (this.active) this.applySoon(); }).observe(document.body, { childList: true, subtree: true });
+    Settings.on('change', mod => { if (mod === 'ui') this.applySoon(); });
+    this.applySoon();
+  }
+
+  get active() { return this.dock > 0 || Settings.get('ui', 'fixedSize'); }
+
+  setDock(px) { this.dock = Math.max(0, px | 0); this.apply(); }
+
+  applySoon() {
+    if (this.pending) return;
+    this.pending = true;
+    requestAnimationFrame(() => { this.pending = false; this.apply(); });
+  }
+
+  apply() {
+    const scr = document.querySelector('.screen');
+    const root = document.documentElement;
+    if (!scr) return;
+    const par = scr.parentElement;
+    if (!this.active) {
+      if (root.classList.contains('gpp-layout')) { root.classList.remove('gpp-layout'); par.style.marginLeft = ''; this.emit('change'); }
+      return;
+    }
+    root.classList.add('gpp-layout');
+    const ml = this.dock ? this.dock + 'px' : '';
+    if (par.style.marginLeft !== ml) par.style.marginLeft = ml;
+    const pr = par.getBoundingClientRect();
+    const fit = Math.min((pr.width - 12) / scr.offsetWidth, (pr.height - 12) / scr.offsetHeight);
+    const scale = Settings.get('ui', 'fixedSize') ? Math.min(Settings.get('ui', 'fixedScale'), this.dock ? fit : Infinity) : fit;
+    const val = String(Math.max(0.3, Math.round(scale * 1000) / 1000));
+    if (root.style.getPropertyValue('--gpp-scr-scale') !== val) { root.style.setProperty('--gpp-scr-scale', val); this.emit('change'); }
+    else if (this.lastDock !== this.dock) this.emit('change');
+    this.lastDock = this.dock;
+  }
+
+  /* Прямоугольник экрана игры в координатах окна */
+  screenRect() { return document.querySelector('.screen')?.getBoundingClientRect() || null; }
+})();
